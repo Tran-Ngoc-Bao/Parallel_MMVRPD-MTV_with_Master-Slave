@@ -1,0 +1,7 @@
+.claude/
+.vscode/
+.DS_Store
+__pycache__/
+
+build/
+target/
