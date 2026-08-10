@@ -813,6 +813,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
     size_t last_improved    = 0;
     std::array<std::size_t, NEIGHBORHOOD_COUNT> neighborhood_evals{};
     std::array<std::size_t, NEIGHBORHOOD_COUNT> neighborhood_selects{};
+    std::size_t total_evals = 0;
 
     auto record_new = [&](const Solution& nb, size_t iteration, size_t segment) {
         if (nb.cost() + TOLERANCE < result.cost() && nb.feasible) {
@@ -861,6 +862,11 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
     auto search_start = std::chrono::steady_clock::now();
 
     for (size_t iteration = 1; iteration <= max_iter; ++iteration) {
+        // Stop-condition priority: max-evaluations, then time-limit, then
+        // non-improving segments (checked further below via elite_set /
+        // hooks->should_stop).
+        if (cfg.max_evaluations > 0 && total_evals >= cfg.max_evaluations) break;
+
         if (cfg.time_limit > 0.0) {
             double elapsed = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - search_start).count();
@@ -907,6 +913,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
             tabu_sz, result.cost(), neighbor, nb_evals);
         neighborhood_evals[static_cast<std::size_t>(nb)]   += nb_evals;
         neighborhood_selects[static_cast<std::size_t>(nb)] += 1;
+        total_evals += nb_evals;
 
         if (found) {
             if (neighbor.feasible) {
@@ -957,7 +964,18 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                     }
                 }
 
-                if (hooks && hooks->should_stop && hooks->should_stop()) {
+                // The master signals a stop once every running worker has
+                // hit its pull-quota (a segment-count criterion, unrelated
+                // to evaluations). When an evaluations budget is set, that
+                // budget takes priority -- honoring should_stop() here
+                // would cut workers off long before they reach
+                // max_evaluations, making the budget effectively split by
+                // wall-clock/segment timing instead of each worker running
+                // the full amount. So skip it and keep going; the
+                // top-of-loop max_evaluations check is what actually stops
+                // this worker.
+                if (cfg.max_evaluations == 0 &&
+                    hooks && hooks->should_stop && hooks->should_stop()) {
                     break;
                 }
 
@@ -981,6 +999,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                         cfg.ejection_chain_iterations + 1, result.cost(), ec_neighbor, ec_evals);
                     neighborhood_evals[static_cast<std::size_t>(Neighborhood::EjectionChain)]   += ec_evals;
                     neighborhood_selects[static_cast<std::size_t>(Neighborhood::EjectionChain)] += 1;
+                    total_evals += ec_evals;
                     if (ec_found) {
                         current = ec_neighbor;
                         record_new(current, iteration, adaptive.segment);
@@ -1001,10 +1020,13 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                 adaptive.weights.assign(NUM_NEIGHBORHOODS, 1.0);
 
                 if (elite_set.empty()) {
-                    // With a time limit, keep the search alive past segment
-                    // exhaustion by reseeding from the best solution found so
-                    // far instead of terminating.
-                    if (cfg.time_limit > 0.0) elite_set.push_back(result);
+                    // With an evaluations budget or a time limit, keep the
+                    // search alive past segment exhaustion by reseeding from
+                    // the best solution found so far instead of terminating
+                    // -- the non-improving-segments stop condition only
+                    // applies when neither of those higher-priority budgets
+                    // is set.
+                    if (cfg.max_evaluations > 0 || cfg.time_limit > 0.0) elite_set.push_back(result);
                     else break;
                 }
 
@@ -1025,6 +1047,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                         cfg.ejection_chain_iterations + 1, result.cost(), ec_neighbor, ec_evals);
                     neighborhood_evals[static_cast<std::size_t>(Neighborhood::EjectionChain)]   += ec_evals;
                     neighborhood_selects[static_cast<std::size_t>(Neighborhood::EjectionChain)] += 1;
+                    total_evals += ec_evals;
                     if (ec_found) {
                         current = ec_neighbor;
                         record_new(current, iteration, adaptive.segment);

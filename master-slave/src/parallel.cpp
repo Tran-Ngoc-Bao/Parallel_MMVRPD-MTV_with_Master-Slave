@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <list>
 #include <string>
 #include <thread>
 #include <random>
@@ -185,6 +186,65 @@ void send_solution(int dest, int tag, const Solution& solution)
 Solution recv_solution(int source, int tag)
 {
     return Solution::from_json(nlohmann::json::parse(recv_string_impl(source, tag)));
+}
+
+// -----------------------------------------------------------------------
+// Non-blocking push_elite
+//
+// push_elite fires on every worker-side improvement, which can be very
+// frequent (hundreds of times per run). A blocking MPI_Send there stalls
+// the search loop until the message is matched on the master side. Using
+// MPI_Isend instead lets the worker keep evaluating immediately; the two
+// underlying sends (size header, then payload -- same wire format/tag as
+// send_solution/recv_solution, so the master-side receive code is
+// unchanged) complete in the background.
+//
+// A std::list is used (not std::vector) because MPI_Isend holds onto the
+// address of the buffers passed to it until the operation completes --
+// the entries must never be moved/reallocated while a send is in flight.
+// -----------------------------------------------------------------------
+struct PendingSend {
+    int size = 0;
+    std::string payload;
+    MPI_Request req_size    = MPI_REQUEST_NULL;
+    MPI_Request req_payload = MPI_REQUEST_NULL;
+};
+
+void reap_completed_sends(std::list<PendingSend>& pending)
+{
+    for (auto it = pending.begin(); it != pending.end(); ) {
+        int done_size = 0, done_payload = 0;
+        MPI_Test(&it->req_size, &done_size, MPI_STATUS_IGNORE);
+        MPI_Test(&it->req_payload, &done_payload, MPI_STATUS_IGNORE);
+        if (done_size && done_payload) it = pending.erase(it);
+        else ++it;
+    }
+}
+
+void send_solution_async(int dest, int tag, const Solution& solution,
+                          std::list<PendingSend>& pending)
+{
+    reap_completed_sends(pending);
+
+    pending.emplace_back();
+    PendingSend& p = pending.back();
+    p.payload = solution.to_json().dump();
+    p.size    = static_cast<int>(p.payload.size());
+    MPI_Isend(&p.size, 1, MPI_INT, dest, tag, MPI_COMM_WORLD, &p.req_size);
+    if (p.size > 0) {
+        MPI_Isend(p.payload.data(), p.size, MPI_CHAR, dest, tag, MPI_COMM_WORLD, &p.req_payload);
+    }
+}
+
+// Blocks until every in-flight send has completed. Must be called before
+// the process tears down (MPI_Finalize) so no message is lost/truncated.
+void wait_all_pending_sends(std::list<PendingSend>& pending)
+{
+    for (auto& p : pending) {
+        MPI_Wait(&p.req_size, MPI_STATUS_IGNORE);
+        MPI_Wait(&p.req_payload, MPI_STATUS_IGNORE);
+    }
+    pending.clear();
 }
 
 void send_stats(int dest,
@@ -599,7 +659,7 @@ Solution run_master(int world_size)
         }
 
         if (!processed) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
         }
     }
     const auto t2 = std::chrono::steady_clock::now();
@@ -654,10 +714,12 @@ void run_worker(int /*rank*/)
     set_global_config(worker_cfg);
     Solution root = Solution::initialize();
 
+    std::list<PendingSend> pending_pushes;
+
     Solution::EliteHooks hooks;
     hooks.push_elite = [&](std::size_t, const Solution& elite) {
         if (is_valid_solution_for_exchange(elite)) {
-            send_solution(0, TAG_ELITE_PUSH, elite);
+            send_solution_async(0, TAG_ELITE_PUSH, elite, pending_pushes);
         }
     };
     bool stop_requested = false;
@@ -678,6 +740,7 @@ void run_worker(int /*rank*/)
 
     Logger logger;
     Solution result = Solution::tabu_search(root, logger, &hooks);
+    wait_all_pending_sends(pending_pushes);
     send_solution(0, TAG_RESULT, result);
     send_stats(0, logger.neighborhood_evaluations, logger.neighborhood_selections);
 }

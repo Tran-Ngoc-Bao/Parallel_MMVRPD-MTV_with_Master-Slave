@@ -301,6 +301,7 @@ Config build_config(const cli::RunArgs& args)
     cfg.reset_after_factor        = args.reset_after_factor;
     cfg.max_elite_size            = args.max_elite_size;
     cfg.time_limit                = args.time_limit;
+    cfg.max_evaluations           = args.max_evaluations;
     cfg.penalty_exponent          = args.penalty_exponent;
     cfg.single_truck_route        = args.single_truck_route;
     cfg.single_drone_route        = args.single_drone_route;
@@ -460,6 +461,7 @@ nlohmann::json config_to_json(const Config& cfg) {
     j["reset_after_factor"]        = cfg.reset_after_factor;
     j["max_elite_size"]            = cfg.max_elite_size;
     j["time_limit"]                = cfg.time_limit;
+    j["max_evaluations"]           = cfg.max_evaluations;
     j["penalty_exponent"]          = cfg.penalty_exponent;
     j["single_truck_route"]        = cfg.single_truck_route;
     j["single_drone_route"]        = cfg.single_drone_route;
@@ -622,6 +624,7 @@ Config build_config_from_json(const std::string& json_path)
     cfg.reset_after_factor        = j.at("reset_after_factor").get<double>();
     cfg.max_elite_size            = j.at("max_elite_size").get<std::size_t>();
     cfg.time_limit                = j.value("time_limit", 0.0);
+    cfg.max_evaluations           = j.value("max_evaluations", static_cast<std::size_t>(0));
     cfg.penalty_exponent          = j.at("penalty_exponent").get<double>();
     cfg.single_truck_route        = j.at("single_truck_route").get<bool>();
     cfg.single_drone_route        = j.at("single_drone_route").get<bool>();

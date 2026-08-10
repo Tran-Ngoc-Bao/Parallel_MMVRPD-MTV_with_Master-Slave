@@ -115,6 +115,10 @@ int main(int argc, char** argv)
     run_cmd->add_option("--time-limit",           args.run.time_limit,
         "If non-zero, stop after this many seconds instead of after a number "
         "of non-improving segments");
+    run_cmd->add_option("--max-evaluations",      args.run.max_evaluations,
+        "If non-zero, stop after this many total neighborhood evaluations "
+        "(per worker). Stop-condition priority: max-evaluations, then "
+        "time-limit, then non-improving segments");
     run_cmd->add_option("--penalty-exponent",     args.run.penalty_exponent);
     run_cmd->add_flag  ("--single-truck-route",   args.run.single_truck_route);
     run_cmd->add_flag  ("--single-drone-route",   args.run.single_drone_route);

@@ -151,6 +151,7 @@ struct Config {
     std::size_t          max_elite_size            = 0;
     double               elite_pool_factor         = 0.03;
     double               time_limit                = 0.0;
+    std::size_t          max_evaluations           = 0;
     double               penalty_exponent          = 0.5;
     bool                 single_truck_route        = false;
     bool                 single_drone_route        = false;
