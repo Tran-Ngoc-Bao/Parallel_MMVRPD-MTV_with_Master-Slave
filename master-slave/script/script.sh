@@ -16,7 +16,7 @@ ELITE_PULL_STRATEGY="${ELITE_PULL_STRATEGY:-topk}"
 MIN_PULL_ELITES_PER_WORKER_FACTOR="${MIN_PULL_ELITES_PER_WORKER_FACTOR:-1.0}"
 ELITE_POOL_FACTOR="${ELITE_POOL_FACTOR:-0.06}"
 WORKER_HYPERPARAMS="${WORKER_HYPERPARAMS:-fixed}"
-PREFER_PULLED="${PREFER_PULLED:-1}"
+ELITE_REPLACE_STRATEGY="${ELITE_REPLACE_STRATEGY:-similarity-pull-first}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 OUTPUTS_DIR="${OUTPUTS_DIR:-outputs}"
 COMPACT_OUTPUT="${COMPACT_OUTPUT:-1}"
@@ -26,22 +26,19 @@ MAX_EVALUATIONS="${MAX_EVALUATIONS:-}"
 
 CMD=(
   mpirun --allow-run-as-root -np "${NUM_WORKERS}"
-  "${BUILD_DIR}/tabu_search" run
+  "${BUILD_DIR}/master_slave" run
   "${PROBLEM_FILE}"
   --adaptive-iterations "${ADAPTIVE_ITERATIONS}"
   --adaptive-pull-elite-segments "${ADAPTIVE_PULL_ELITE_SEGMENTS}"
   --elite-pull-strategy "${ELITE_PULL_STRATEGY}"
   --min-pull-elites-per-worker-factor "${MIN_PULL_ELITES_PER_WORKER_FACTOR}"
   --elite-pool-factor "${ELITE_POOL_FACTOR}"
+  --elite-replace-strategy "${ELITE_REPLACE_STRATEGY}"
   --outputs "${OUTPUTS_DIR}"
 )
 
 if [ "${WORKER_HYPERPARAMS}" != "fixed" ]; then
   CMD+=(--worker-hyperparams "${WORKER_HYPERPARAMS}")
-fi
-
-if [ "${PREFER_PULLED}" = "1" ]; then
-  CMD+=(--prefer-pulled)
 fi
 
 if [ "${COMPACT_OUTPUT}" = "1" ]; then

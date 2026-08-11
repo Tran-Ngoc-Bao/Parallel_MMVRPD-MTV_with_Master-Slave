@@ -60,8 +60,6 @@ int main(int argc, char** argv)
                         "fixed|random|preset (default: fixed)")->transform(
         CLI::CheckedTransformer(wh_map, CLI::ignore_case));
     run_cmd->add_flag  ("--randomize-worker-adaptive-hyperparams", args.run.randomize_worker_adaptive_hyperparams);
-    run_cmd->add_flag  ("--prefer-pulled",             args.run.prefer_pulled);
-    run_cmd->add_flag  ("--save-convergence",          args.run.save_convergence);
     run_cmd->add_flag  ("--compact-output",            args.run.compact_output);
     run_cmd->add_option("--run-id",                    args.run.run_id);
 
@@ -70,10 +68,26 @@ int main(int argc, char** argv)
         {"topk",      cli::ElitePullStrategy::TopK},
         {"rank",      cli::ElitePullStrategy::Rank},
         {"pullcount", cli::ElitePullStrategy::PullCount},
-        {"diverse",   cli::ElitePullStrategy::Diverse}
+        {"off",       cli::ElitePullStrategy::Off}
     };
     run_cmd->add_option("--elite-pull-strategy", args.run.elite_pull_strategy)->transform(
         CLI::CheckedTransformer(elite_pull_map, CLI::ignore_case));
+
+    std::map<std::string, cli::ElitePushStrategy> elite_push_map{
+        {"new-best",         cli::ElitePushStrategy::NewBest},
+        {"segment-best",     cli::ElitePushStrategy::SegmentBest},
+        {"significant-best", cli::ElitePushStrategy::SignificantBest}
+    };
+    run_cmd->add_option("--elite-push-strategy", args.run.elite_push_strategy)->transform(
+        CLI::CheckedTransformer(elite_push_map, CLI::ignore_case));
+
+    std::map<std::string, cli::EliteReplaceStrategy> elite_replace_map{
+        {"similarity-only",       cli::EliteReplaceStrategy::SimilarityOnly},
+        {"similarity-quality",    cli::EliteReplaceStrategy::SimilarityQuality},
+        {"similarity-pull-first", cli::EliteReplaceStrategy::SimilarityPullFirst}
+    };
+    run_cmd->add_option("--elite-replace-strategy", args.run.elite_replace_strategy)->transform(
+        CLI::CheckedTransformer(elite_replace_map, CLI::ignore_case));
 
     std::map<std::string, cli::ConfigType> ct_map{
         {"low", cli::ConfigType::Low}, {"high", cli::ConfigType::High}

@@ -3,8 +3,9 @@ set -euo pipefail
 export LC_NUMERIC=C
 
 JOBS=(
-    "200   194000000   4"
-    # "500   2758000000  80"
+    "200   194000000"
+    "500   2758000000"
+    "1000  13416000000"
 )
 
 # Usage:
@@ -19,14 +20,14 @@ NUM_WORKERS="${2:-7}"
 N_LIST=()
 START_TS=$(date +%s)
 for JOB in "${JOBS[@]}"; do
-    read -r N MAX_EVALUATIONS SLEEP_SEC <<< "${JOB}"
+    read -r N MAX_EVALUATIONS <<< "${JOB}"
     N_LIST+=("${N}")
 
     echo
     echo "################################################################"
-    echo "# n=${N}  max_evaluations=${MAX_EVALUATIONS}  sleep_sec=${SLEEP_SEC}  [master-slave]   $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "# n=${N}  max_evaluations=${MAX_EVALUATIONS}  [master-slave]   $(date '+%Y-%m-%d %H:%M:%S')"
     echo "################################################################"
-    bash "${RUN2_SCRIPT}" "${N}" "${RUNS}" "${SLEEP_SEC}" "${NUM_WORKERS}" "${MAX_EVALUATIONS}"
+    bash "${RUN2_SCRIPT}" "${N}" "${RUNS}" "${NUM_WORKERS}" "${MAX_EVALUATIONS}"
 done
 
 ELAPSED=$(( $(date +%s) - START_TS ))

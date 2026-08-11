@@ -3,7 +3,7 @@
 #include <fstream>
 #include <chrono>
 #include <optional>
-#include <array>
+#include <vector>
 #include "neighborhoods.hpp"
 
 struct Solution;
@@ -16,12 +16,7 @@ struct Logger {
     std::string _id;
     std::optional<std::ofstream> _writer;
 
-    // Snapshot of the arguments passed to the most recent finalize() call.
-    // Populated regardless of cfg.disable_logging, so callers (e.g. an MPI
-    // worker) can still retrieve and forward these stats even when this
-    // Logger itself never wrote them to disk.
-    std::array<std::size_t, NEIGHBORHOOD_COUNT> neighborhood_evaluations{};
-    std::array<std::size_t, NEIGHBORHOOD_COUNT> neighborhood_selections{};
+    std::size_t total_evaluations = 0;
 
     Logger();  // initializes, creates CSV file if logging enabled
     ~Logger() = default;
@@ -38,6 +33,9 @@ struct Logger {
                   size_t last_improved,
                   double post_optimization,
                   double post_optimization_elapsed,
-                  const std::array<std::size_t, NEIGHBORHOOD_COUNT>& neighborhood_evaluations = {},
-                  const std::array<std::size_t, NEIGHBORHOOD_COUNT>& neighborhood_selections = {});
+                  std::size_t total_evaluations = 0,
+                  std::size_t total_elite_pushes = 0,
+                  std::size_t accepted_elite_pushes = 0,
+                  std::size_t evaluation_checkpoint_budget = 0,
+                  const std::vector<double>& best_cost_by_evaluation_checkpoint = {});
 };

@@ -8,7 +8,9 @@ namespace cli {
 enum class EnergyModel { Linear = 0, NonLinear = 1, Endurance = 2, Unlimited = 3 };
 enum class ConfigType  { Low, High };
 enum class Strategy    { Random, Cyclic, Vns, Adaptive };
-enum class ElitePullStrategy { Random, TopK, Rank, PullCount, Diverse };
+enum class ElitePullStrategy { Random, TopK, Rank, PullCount, Off };
+enum class ElitePushStrategy { NewBest, SegmentBest, SignificantBest };
+enum class EliteReplaceStrategy { SimilarityOnly, SimilarityQuality, SimilarityPullFirst };
 enum class DistanceType{ Manhattan, Euclidean };
 enum class WorkerHyperparams { Fixed, Random, Preset };
 
@@ -39,7 +41,23 @@ inline const char* to_str(ElitePullStrategy s){
         case ElitePullStrategy::TopK:      return "topk";
         case ElitePullStrategy::Rank:      return "rank";
         case ElitePullStrategy::PullCount: return "pullcount";
-        case ElitePullStrategy::Diverse:   return "diverse";
+        case ElitePullStrategy::Off:       return "off";
+    }
+    return "";
+}
+inline const char* to_str(ElitePushStrategy s){
+    switch(s){
+        case ElitePushStrategy::NewBest:        return "new-best";
+        case ElitePushStrategy::SegmentBest:    return "segment-best";
+        case ElitePushStrategy::SignificantBest:return "significant-best";
+    }
+    return "";
+}
+inline const char* to_str(EliteReplaceStrategy s){
+    switch(s){
+        case EliteReplaceStrategy::SimilarityOnly:      return "similarity-only";
+        case EliteReplaceStrategy::SimilarityQuality:   return "similarity-quality";
+        case EliteReplaceStrategy::SimilarityPullFirst: return "similarity-pull-first";
     }
     return "";
 }
@@ -72,6 +90,7 @@ struct RunArgs {
     double        destroy_rate               = 0.1;
     double        elite_pool_factor          = 0.03;
     ElitePullStrategy elite_pull_strategy    = ElitePullStrategy::Random;
+    ElitePushStrategy elite_push_strategy    = ElitePushStrategy::NewBest;
     ConfigType    speed_type                 = ConfigType::High;
     ConfigType    range_type                 = ConfigType::High;
     DistanceType  truck_distance             = DistanceType::Euclidean;
@@ -101,8 +120,7 @@ struct RunArgs {
     double        min_pull_elites_per_worker_factor = 1.0;
     WorkerHyperparams worker_hyperparams     = WorkerHyperparams::Fixed;
     bool          randomize_worker_adaptive_hyperparams = false;
-    bool          prefer_pulled              = false;
-    bool          save_convergence           = false;
+    EliteReplaceStrategy elite_replace_strategy = EliteReplaceStrategy::SimilarityOnly;
     bool          compact_output             = false;
     std::string   run_id                     = "";
 };

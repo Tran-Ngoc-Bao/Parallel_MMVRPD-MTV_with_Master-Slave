@@ -16,10 +16,6 @@ enum class Neighborhood {
     EjectionChain
 };
 
-// Number of distinct Neighborhood values (used to size per-neighborhood
-// evaluation-count arrays).
-inline constexpr std::size_t NEIGHBORHOOD_COUNT = 7;
-
 inline std::string neighborhood_to_str(Neighborhood n) {
     switch(n) {
         case Neighborhood::Move10:        return "Move (1, 0)";
@@ -34,13 +30,7 @@ inline std::string neighborhood_to_str(Neighborhood n) {
 }
 
 // -----------------------------------------------------------------------
-// TabuSet – same externally-observable behavior as the previous
-// std::vector<std::vector<size_t>> tabu list (insertion-ordered, FIFO
-// eviction, "touch" rotates an existing entry to the back), but backed by
-// an unordered_set for O(1) membership testing instead of a linear
-// std::find. Membership checks happen once per *candidate* (hot path,
-// millions of calls); touch() happens once per neighborhood *selection*
-// (thousands of calls), so it is fine for touch() to remain O(tabu_size).
+// TabuSet
 // -----------------------------------------------------------------------
 struct VectorSizeTHash {
     std::size_t operator()(const std::vector<size_t>& v) const noexcept {
@@ -58,9 +48,6 @@ public:
         return set_.find(v) != set_.end();
     }
 
-    // Mirrors the original logic: rotate an existing entry to the back
-    // (extends its life), otherwise insert at the back and evict the
-    // oldest entry if over capacity.
     void touch(std::vector<size_t> v, std::size_t max_size) {
         auto it = std::find(order_.begin(), order_.end(), v);
         if (it != order_.end()) {
@@ -89,8 +76,6 @@ private:
 struct Solution;
 
 namespace neighborhoods {
-    // Returns {best_solution, tabu_entry}. `evaluations` is set to the
-    // number of candidate neighbor solutions assessed during this call.
     std::pair<Solution, std::vector<size_t>> inter_route(
         Neighborhood n,
         const Solution& solution,
@@ -105,10 +90,6 @@ namespace neighborhoods {
         double aspiration_cost,
         std::size_t& evaluations);
 
-    // Returns nullopt if no improvement found (both neighborhoods empty)
-    // Otherwise returns the best neighbor and updates tabu_list.
-    // `evaluations` is set to the total number of candidate neighbor
-    // solutions assessed during this call (intra + inter route).
     bool search(
         Neighborhood n,
         const Solution& solution,

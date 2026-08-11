@@ -297,6 +297,7 @@ Config build_config(const cli::RunArgs& args)
     cfg.waiting_time_limit        = args.waiting_time_limit;
     cfg.strategy                  = args.strategy;
     cfg.elite_pull_strategy       = args.elite_pull_strategy;
+    cfg.elite_push_strategy       = args.elite_push_strategy;
     cfg.fix_iteration             = args.fix_iteration;
     cfg.reset_after_factor        = args.reset_after_factor;
     cfg.max_elite_size            = args.max_elite_size;
@@ -318,8 +319,7 @@ Config build_config(const cli::RunArgs& args)
     cfg.min_pull_elites_per_worker_factor = args.min_pull_elites_per_worker_factor;
     cfg.worker_hyperparams        = args.worker_hyperparams;
     cfg.randomize_worker_adaptive_hyperparams = args.randomize_worker_adaptive_hyperparams;
-    cfg.prefer_pulled             = args.prefer_pulled;
-    cfg.save_convergence          = args.save_convergence;
+    cfg.elite_replace_strategy    = args.elite_replace_strategy;
     cfg.compact_output            = args.compact_output;
     cfg.run_id                    = args.run_id;
     return cfg;
@@ -355,7 +355,23 @@ static std::string elite_pull_strategy_str(cli::ElitePullStrategy s) {
         case cli::ElitePullStrategy::TopK:      return "topk";
         case cli::ElitePullStrategy::Rank:      return "rank";
         case cli::ElitePullStrategy::PullCount: return "pullcount";
-        case cli::ElitePullStrategy::Diverse:   return "diverse";
+        case cli::ElitePullStrategy::Off:       return "off";
+    }
+    return "";
+}
+static std::string elite_push_strategy_str(cli::ElitePushStrategy s) {
+    switch(s) {
+        case cli::ElitePushStrategy::NewBest:         return "new-best";
+        case cli::ElitePushStrategy::SegmentBest:     return "segment-best";
+        case cli::ElitePushStrategy::SignificantBest: return "significant-best";
+    }
+    return "";
+}
+static std::string elite_replace_strategy_str(cli::EliteReplaceStrategy s) {
+    switch(s) {
+        case cli::EliteReplaceStrategy::SimilarityOnly:      return "similarity-only";
+        case cli::EliteReplaceStrategy::SimilarityQuality:   return "similarity-quality";
+        case cli::EliteReplaceStrategy::SimilarityPullFirst: return "similarity-pull-first";
     }
     return "";
 }
@@ -454,6 +470,7 @@ nlohmann::json config_to_json(const Config& cfg) {
     j["waiting_time_limit"]        = cfg.waiting_time_limit;
     j["strategy"]                  = strategy_str(cfg.strategy);
     j["elite_pull_strategy"]       = elite_pull_strategy_str(cfg.elite_pull_strategy);
+    j["elite_push_strategy"]       = elite_push_strategy_str(cfg.elite_push_strategy);
     if (cfg.fix_iteration)
         j["fix_iteration"]         = *cfg.fix_iteration;
     else
@@ -477,8 +494,7 @@ nlohmann::json config_to_json(const Config& cfg) {
     j["min_pull_elites_per_worker_factor"] = cfg.min_pull_elites_per_worker_factor;
     j["worker_hyperparams"]        = cli::to_str(cfg.worker_hyperparams);
     j["randomize_worker_adaptive_hyperparams"] = cfg.randomize_worker_adaptive_hyperparams;
-    j["prefer_pulled"]             = cfg.prefer_pulled;
-    j["save_convergence"]          = cfg.save_convergence;
+    j["elite_replace_strategy"]    = elite_replace_strategy_str(cfg.elite_replace_strategy);
     j["compact_output"]            = cfg.compact_output;
     j["run_id"]                    = cfg.run_id;
     return j;
@@ -598,8 +614,18 @@ Config build_config_from_json(const std::string& json_path)
         if (s == "topk")     return cli::ElitePullStrategy::TopK;
         if (s == "rank")     return cli::ElitePullStrategy::Rank;
         if (s == "pullcount")return cli::ElitePullStrategy::PullCount;
-        if (s == "diverse")  return cli::ElitePullStrategy::Diverse;
+        if (s == "off")      return cli::ElitePullStrategy::Off;
         return cli::ElitePullStrategy::Random;
+    };
+    auto elite_push_from_str = [](const std::string& s) {
+        if (s == "segment-best")     return cli::ElitePushStrategy::SegmentBest;
+        if (s == "significant-best") return cli::ElitePushStrategy::SignificantBest;
+        return cli::ElitePushStrategy::NewBest;
+    };
+    auto elite_replace_from_str = [](const std::string& s) {
+        if (s == "similarity-quality")    return cli::EliteReplaceStrategy::SimilarityQuality;
+        if (s == "similarity-pull-first") return cli::EliteReplaceStrategy::SimilarityPullFirst;
+        return cli::EliteReplaceStrategy::SimilarityOnly;
     };
 
     cfg.problem                   = j.at("problem").get<std::string>();
@@ -619,6 +645,9 @@ Config build_config_from_json(const std::string& json_path)
     cfg.elite_pull_strategy       = j.contains("elite_pull_strategy")
         ? elite_pull_from_str(j.at("elite_pull_strategy").get<std::string>())
         : cli::ElitePullStrategy::Random;
+    cfg.elite_push_strategy       = j.contains("elite_push_strategy")
+        ? elite_push_from_str(j.at("elite_push_strategy").get<std::string>())
+        : cli::ElitePushStrategy::NewBest;
     if (!j.at("fix_iteration").is_null())
         cfg.fix_iteration         = j.at("fix_iteration").get<std::size_t>();
     cfg.reset_after_factor        = j.at("reset_after_factor").get<double>();
@@ -645,8 +674,16 @@ Config build_config_from_json(const std::string& json_path)
         else                    cfg.worker_hyperparams = cli::WorkerHyperparams::Fixed;
     }
     cfg.randomize_worker_adaptive_hyperparams = j.at("randomize_worker_adaptive_hyperparams").get<bool>();
-    cfg.prefer_pulled             = j.at("prefer_pulled").get<bool>();
-    cfg.save_convergence          = j.at("save_convergence").get<bool>();
+    if (j.contains("elite_replace_strategy")) {
+        cfg.elite_replace_strategy = elite_replace_from_str(j.at("elite_replace_strategy").get<std::string>());
+    } else if (j.contains("prefer_pulled")) {
+        // Back-compat with configs saved before elite_replace_strategy existed.
+        cfg.elite_replace_strategy = j.at("prefer_pulled").get<bool>()
+            ? cli::EliteReplaceStrategy::SimilarityPullFirst
+            : cli::EliteReplaceStrategy::SimilarityOnly;
+    } else {
+        cfg.elite_replace_strategy = cli::EliteReplaceStrategy::SimilarityOnly;
+    }
     cfg.compact_output            = j.at("compact_output").get<bool>();
     cfg.run_id                    = j.value("run_id", "");
     return cfg;

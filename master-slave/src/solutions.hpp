@@ -51,28 +51,13 @@ struct Solution {
         std::function<void(std::size_t iteration, const Solution& elite)> push_elite;
         std::function<bool(std::size_t iteration, Solution& pulled_elite)> pull_elite;
         std::function<bool()> should_stop;
+        std::function<void(std::size_t total_evaluations)> report_progress;
     };
 
-    // Factory – computes all derived fields (full recompute, always correct;
-    // this is the reference implementation used everywhere update_delta_inplace
-    // is not explicitly used).
     static Solution make(
         std::vector<std::vector<LocalRc<TruckRoute>>> truck_routes,
         std::vector<std::vector<LocalRc<DroneRoute>>> drone_routes);
 
-    // Recomputes `scratch` in place for the given new route sets. `base`
-    // must be the solution `scratch` was last synced from (i.e. the
-    // unmodified original the candidate routes were derived from) so that,
-    // per vehicle, an unchanged route list (same LocalRc pointers, checked
-    // via operator==) can reuse base's cached working_time/violations
-    // instead of re-deriving them. Vehicles whose route list did change are
-    // always fully recomputed from their routes, exactly like make() would.
-    // Produces the same working_time/feasible/etc. as calling
-    // make(new_truck_routes, new_drone_routes) directly (mathematically
-    // equivalent summation, so results may differ from make() by
-    // floating-point noise on the order of 1e-13 relative error -- never
-    // enough to change a feasible/violation-free vehicle's zero, since
-    // those are exact 0.0 sums).
     static void update_delta_inplace(
         Solution& scratch,
         const Solution& base,

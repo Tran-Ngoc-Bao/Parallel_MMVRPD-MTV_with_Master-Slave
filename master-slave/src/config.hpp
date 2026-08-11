@@ -146,6 +146,7 @@ struct Config {
     double               waiting_time_limit        = 3600.0;
     cli::Strategy        strategy                  = cli::Strategy::Adaptive;
     cli::ElitePullStrategy elite_pull_strategy     = cli::ElitePullStrategy::Random;
+    cli::ElitePushStrategy elite_push_strategy     = cli::ElitePushStrategy::NewBest;
     std::optional<std::size_t> fix_iteration       = std::nullopt;
     double               reset_after_factor        = 125.0;
     std::size_t          max_elite_size            = 0;
@@ -168,8 +169,7 @@ struct Config {
     double          min_pull_elites_per_worker_factor = 1.0;
     cli::WorkerHyperparams worker_hyperparams      = cli::WorkerHyperparams::Fixed;
     bool            randomize_worker_adaptive_hyperparams = false;
-    bool            prefer_pulled                  = false;
-    bool            save_convergence               = false;
+    cli::EliteReplaceStrategy elite_replace_strategy = cli::EliteReplaceStrategy::SimilarityOnly;
     bool            compact_output                 = false;
     std::string     run_id                         = "";
 };

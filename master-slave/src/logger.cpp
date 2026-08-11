@@ -160,11 +160,13 @@ void Logger::finalize(const Solution& result,
                       size_t last_improved,
                       double post_optimization,
                       double post_optimization_elapsed,
-                      const std::array<std::size_t, NEIGHBORHOOD_COUNT>& neighborhood_evaluations,
-                      const std::array<std::size_t, NEIGHBORHOOD_COUNT>& neighborhood_selections)
+                      std::size_t total_evaluations,
+                      std::size_t total_elite_pushes,
+                      std::size_t accepted_elite_pushes,
+                      std::size_t evaluation_checkpoint_budget,
+                      const std::vector<double>& best_cost_by_evaluation_checkpoint)
 {
-    this->neighborhood_evaluations = neighborhood_evaluations;
-    this->neighborhood_selections  = neighborhood_selections;
+    this->total_evaluations = total_evaluations;
 
     const Config& cfg = global_config();
     if (cfg.disable_logging) return;
@@ -174,33 +176,6 @@ void Logger::finalize(const Solution& result,
 
     auto sj = result.to_json();
     auto cj = config_to_json(cfg);
-
-    nlohmann::json neval    = nlohmann::json::object();
-    std::size_t total_evals = 0;
-    for (std::size_t i = 0; i < neighborhood_evaluations.size(); ++i) {
-        neval[neighborhood_to_str(static_cast<Neighborhood>(i))] = neighborhood_evaluations[i];
-        total_evals += neighborhood_evaluations[i];
-    }
-
-    nlohmann::json nsel      = nlohmann::json::object();
-    std::size_t total_selects = 0;
-    for (std::size_t i = 0; i < neighborhood_selections.size(); ++i) {
-        nsel[neighborhood_to_str(static_cast<Neighborhood>(i))] = neighborhood_selections[i];
-        total_selects += neighborhood_selections[i];
-    }
-
-    double avg_evals_per_select = total_selects > 0
-        ? static_cast<double>(total_evals) / static_cast<double>(total_selects)
-        : 0.0;
-
-    nlohmann::json avg_per_nb = nlohmann::json::object();
-    for (std::size_t i = 0; i < neighborhood_evaluations.size(); ++i) {
-        double avg = neighborhood_selections[i] > 0
-            ? static_cast<double>(neighborhood_evaluations[i]) /
-              static_cast<double>(neighborhood_selections[i])
-            : 0.0;
-        avg_per_nb[neighborhood_to_str(static_cast<Neighborhood>(i))] = avg;
-    }
 
     nlohmann::json run;
     run["problem"]                    = _problem;
@@ -215,12 +190,14 @@ void Logger::finalize(const Solution& result,
     run["elapsed"]                    = elapsed;
     run["post_optimization"]          = post_optimization;
     run["post_optimization_elapsed"]  = post_optimization_elapsed;
-    run["neighborhood_evaluations"]   = neval;
-    run["total_evaluations"]          = total_evals;
-    run["neighborhood_selections"]    = nsel;
-    run["total_selections"]           = total_selects;
-    run["avg_evaluations_per_selection"] = avg_evals_per_select;
-    run["neighborhood_avg_evaluations_per_selection"] = avg_per_nb;
+    run["total_evaluations"]          = total_evaluations;
+    run["total_elite_pushes"]         = total_elite_pushes;
+    run["accepted_elite_pushes"]      = accepted_elite_pushes;
+    run["elite_push_accept_ratio"]    = total_elite_pushes > 0
+        ? static_cast<double>(accepted_elite_pushes) / static_cast<double>(total_elite_pushes)
+        : 0.0;
+    run["evaluation_checkpoint_budget"]        = evaluation_checkpoint_budget;
+    run["best_cost_by_evaluation_checkpoint"]  = best_cost_by_evaluation_checkpoint;
 
     fs::path out(_outputs);
 

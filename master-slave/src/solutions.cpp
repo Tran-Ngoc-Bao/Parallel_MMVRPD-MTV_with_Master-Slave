@@ -41,6 +41,7 @@ static const Neighborhood NEIGHBORHOODS[] = {
 };
 static constexpr size_t NUM_NEIGHBORHOODS = 6;
 static constexpr double TOLERANCE = 0.001;
+static constexpr double SIGNIFICANT_PUSH_RELATIVE_THRESHOLD = 0.001;
 
 // -----------------------------------------------------------------------
 // Solution::make
@@ -71,9 +72,6 @@ Solution Solution::make(
 
     for (size_t t = 0; t < sol.truck_routes.size(); ++t) {
         double sum = 0.0;
-        // Per-vehicle cache, accumulated in parallel with (but not used
-        // in place of) the running totals below, so the totals' exact
-        // floating-point value is unaffected by this bookkeeping.
         double veh_cv = 0.0, veh_wv = 0.0;
         for (const auto& r : sol.truck_routes[t]) {
             sum                += r->working_time();
@@ -128,14 +126,6 @@ Solution Solution::make(
 
 // -----------------------------------------------------------------------
 // Solution::update_delta_inplace
-//
-// Hot-path counterpart to make(): reuses `scratch`'s already-allocated
-// vectors (no heap allocation here as long as vehicle counts match base's,
-// which they always do for the move types this is used from) and, per
-// vehicle, only re-derives working_time/violations when that vehicle's
-// route list actually changed vs `base` (LocalRc pointer comparison, O(1)
-// per route, no virtual calls). Unchanged vehicles copy their cached value
-// from `base` instead.
 // -----------------------------------------------------------------------
 void Solution::update_delta_inplace(
     Solution& scratch,
@@ -811,9 +801,26 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
     std::vector<TabuSet> tabu_lists(NUM_NEIGHBORHOODS);
     size_t neighborhood_idx = 0;
     size_t last_improved    = 0;
-    std::array<std::size_t, NEIGHBORHOOD_COUNT> neighborhood_evals{};
-    std::array<std::size_t, NEIGHBORHOOD_COUNT> neighborhood_selects{};
     std::size_t total_evals = 0;
+
+    const std::size_t eval_report_interval =
+        cfg.max_evaluations > 0 ? std::max<std::size_t>(1, cfg.max_evaluations / 128) : 0;
+    std::size_t next_eval_report = eval_report_interval;
+    auto report_progress_if_due = [&]() {
+        if (eval_report_interval == 0 || !hooks || !hooks->report_progress) return;
+        while (total_evals >= next_eval_report) {
+            hooks->report_progress(total_evals);
+            next_eval_report += eval_report_interval;
+        }
+    };
+    if (eval_report_interval > 0 && hooks && hooks->report_progress) {
+        hooks->report_progress(0);
+    }
+
+    double last_pushed_cost = root.cost();
+    if (hooks && hooks->push_elite) {
+        hooks->push_elite(0, root);
+    }
 
     auto record_new = [&](const Solution& nb, size_t iteration, size_t segment) {
         if (nb.cost() + TOLERANCE < result.cost() && nb.feasible) {
@@ -843,8 +850,25 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                 elite_set.push_back(nb);
             }
 
-            if (hooks && hooks->push_elite) {
+            bool should_push = false;
+            switch (cfg.elite_push_strategy) {
+                case cli::ElitePushStrategy::NewBest:
+                    should_push = true;
+                    break;
+                case cli::ElitePushStrategy::SignificantBest:
+                    should_push = last_pushed_cost <= 0.0
+                        || (last_pushed_cost - result.cost()) / last_pushed_cost
+                               >= SIGNIFICANT_PUSH_RELATIVE_THRESHOLD;
+                    break;
+                case cli::ElitePushStrategy::SegmentBest:
+                    // Pushed at segment boundaries instead of on every improvement.
+                    should_push = false;
+                    break;
+            }
+
+            if (should_push && hooks && hooks->push_elite) {
                 hooks->push_elite(iteration, result);
+                last_pushed_cost = result.cost();
             }
         }
     };
@@ -911,9 +935,8 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
         bool found = neighborhoods::search(
             nb, current, tabu_lists[neighborhood_idx],
             tabu_sz, result.cost(), neighbor, nb_evals);
-        neighborhood_evals[static_cast<std::size_t>(nb)]   += nb_evals;
-        neighborhood_selects[static_cast<std::size_t>(nb)] += 1;
         total_evals += nb_evals;
+        report_progress_if_due();
 
         if (found) {
             if (neighbor.feasible) {
@@ -938,7 +961,16 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
             eos = iteration != last_improved
                && (iteration - last_improved) % adap_its == 0;
 
-        if (eos) ++adaptive.segment;
+        if (eos) {
+            ++adaptive.segment;
+
+            if (cfg.elite_push_strategy == cli::ElitePushStrategy::SegmentBest
+                && hooks && hooks->push_elite
+                && result.cost() + TOLERANCE < last_pushed_cost) {
+                hooks->push_elite(iteration, result);
+                last_pushed_cost = result.cost();
+            }
+        }
 
         // Check reset / elite pull condition
         if (cfg.strategy == cli::Strategy::Adaptive) {
@@ -964,16 +996,6 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                     }
                 }
 
-                // The master signals a stop once every running worker has
-                // hit its pull-quota (a segment-count criterion, unrelated
-                // to evaluations). When an evaluations budget is set, that
-                // budget takes priority -- honoring should_stop() here
-                // would cut workers off long before they reach
-                // max_evaluations, making the budget effectively split by
-                // wall-clock/segment timing instead of each worker running
-                // the full amount. So skip it and keep going; the
-                // top-of-loop max_evaluations check is what actually stops
-                // this worker.
                 if (cfg.max_evaluations == 0 &&
                     hooks && hooks->should_stop && hooks->should_stop()) {
                     break;
@@ -997,9 +1019,8 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                     bool ec_found = neighborhoods::search(
                         Neighborhood::EjectionChain, current, ec_tabu,
                         cfg.ejection_chain_iterations + 1, result.cost(), ec_neighbor, ec_evals);
-                    neighborhood_evals[static_cast<std::size_t>(Neighborhood::EjectionChain)]   += ec_evals;
-                    neighborhood_selects[static_cast<std::size_t>(Neighborhood::EjectionChain)] += 1;
                     total_evals += ec_evals;
+                    report_progress_if_due();
                     if (ec_found) {
                         current = ec_neighbor;
                         record_new(current, iteration, adaptive.segment);
@@ -1020,12 +1041,6 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                 adaptive.weights.assign(NUM_NEIGHBORHOODS, 1.0);
 
                 if (elite_set.empty()) {
-                    // With an evaluations budget or a time limit, keep the
-                    // search alive past segment exhaustion by reseeding from
-                    // the best solution found so far instead of terminating
-                    // -- the non-improving-segments stop condition only
-                    // applies when neither of those higher-priority budgets
-                    // is set.
                     if (cfg.max_evaluations > 0 || cfg.time_limit > 0.0) elite_set.push_back(result);
                     else break;
                 }
@@ -1045,9 +1060,8 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                     bool ec_found = neighborhoods::search(
                         Neighborhood::EjectionChain, current, ec_tabu,
                         cfg.ejection_chain_iterations + 1, result.cost(), ec_neighbor, ec_evals);
-                    neighborhood_evals[static_cast<std::size_t>(Neighborhood::EjectionChain)]   += ec_evals;
-                    neighborhood_selects[static_cast<std::size_t>(Neighborhood::EjectionChain)] += 1;
                     total_evals += ec_evals;
+                    report_progress_if_due();
                     if (ec_found) {
                         current = ec_neighbor;
                         record_new(current, iteration, adaptive.segment);
@@ -1099,11 +1113,30 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
 
     if (cfg.verbose) std::cerr << "\n";
 
+    if (hooks && hooks->push_elite && result.cost() + TOLERANCE < last_pushed_cost) {
+        bool should_push_final = false;
+        switch (cfg.elite_push_strategy) {
+            case cli::ElitePushStrategy::NewBest:
+            case cli::ElitePushStrategy::SegmentBest:
+                should_push_final = true;
+                break;
+            case cli::ElitePushStrategy::SignificantBest:
+                should_push_final = last_pushed_cost <= 0.0
+                    || (last_pushed_cost - result.cost()) / last_pushed_cost
+                           >= SIGNIFICANT_PUSH_RELATIVE_THRESHOLD;
+                break;
+        }
+        if (should_push_final) {
+            hooks->push_elite(last_improved, result);
+            last_pushed_cost = result.cost();
+        }
+    }
+
     // post_optimization stub (not implemented, matches Rust comment-out)
     double post_opt = 0.0, post_opt_elapsed = 0.0;
 
     logger.finalize(result, tabu_sz, reset_after, adap_its,
                     adaptive.segment, last_improved,
-                    post_opt, post_opt_elapsed, neighborhood_evals, neighborhood_selects);
+                    post_opt, post_opt_elapsed, total_evals);
     return result;
 }

@@ -18,6 +18,7 @@ fi
 
 ${SUDO} apt-get update
 ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    vim \
     build-essential \
     cmake \
     git \

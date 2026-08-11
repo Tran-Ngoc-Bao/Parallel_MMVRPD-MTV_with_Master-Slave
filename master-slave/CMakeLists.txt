@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(tabu_search CXX)
+project(master_slave CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -41,7 +41,7 @@ option(PGO_USE      "Compile with PGO profile data"                OFF)
 set(PGO_DATA_DIR "${CMAKE_BINARY_DIR}/pgo-data"
     CACHE PATH "Directory for PGO profile data files")
 
-add_executable(tabu_search
+add_executable(master_slave
     src/main.cpp
     src/parallel.cpp
     src/config.cpp
@@ -52,27 +52,27 @@ add_executable(tabu_search
     src/solutions.cpp
 )
 
-target_include_directories(tabu_search PRIVATE src)
-target_link_libraries(tabu_search PRIVATE CLI11::CLI11 nlohmann_json::nlohmann_json MPI::MPI_CXX mimalloc-static)
+target_include_directories(master_slave PRIVATE src)
+target_link_libraries(master_slave PRIVATE CLI11::CLI11 nlohmann_json::nlohmann_json MPI::MPI_CXX mimalloc-static)
 
 if(OpenMP_CXX_FOUND)
-    target_link_libraries(tabu_search PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(master_slave PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
 if(MSVC)
-    target_compile_options(tabu_search PRIVATE /W3 /O2)
+    target_compile_options(master_slave PRIVATE /W3 /O2)
 else()
-    target_compile_options(tabu_search PRIVATE
+    target_compile_options(master_slave PRIVATE
         -Wall -Wextra -O3 -march=native -flto -fno-rtti)
-    target_link_options(tabu_search PRIVATE -flto)
+    target_link_options(master_slave PRIVATE -flto)
 
     if(PGO_GENERATE)
         file(MAKE_DIRECTORY "${PGO_DATA_DIR}")
-        target_compile_options(tabu_search PRIVATE -fprofile-generate=${PGO_DATA_DIR})
-        target_link_options(tabu_search   PRIVATE -fprofile-generate=${PGO_DATA_DIR})
+        target_compile_options(master_slave PRIVATE -fprofile-generate=${PGO_DATA_DIR})
+        target_link_options(master_slave PRIVATE -fprofile-generate=${PGO_DATA_DIR})
     elseif(PGO_USE)
-        target_compile_options(tabu_search PRIVATE
+        target_compile_options(master_slave PRIVATE
             -fprofile-use=${PGO_DATA_DIR} -fprofile-correction)
-        target_link_options(tabu_search   PRIVATE -fprofile-use=${PGO_DATA_DIR})
+        target_link_options(master_slave PRIVATE -fprofile-use=${PGO_DATA_DIR})
     endif()
 endif()
