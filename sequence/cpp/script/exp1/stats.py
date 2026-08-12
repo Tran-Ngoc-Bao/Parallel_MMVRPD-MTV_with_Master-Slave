@@ -133,6 +133,26 @@ def fmt_fraction(count, total):
     return f"{count}/{total}"
 
 
+def round2(v):
+    return round(v, 2) if v is not None else None
+
+
+def rounded_summary(s):
+    """Rounds a summary row's avg_* fields to 2dp and recomputes
+    avg_delta_rpd_pct from the already-rounded sats/ims values, so the
+    displayed delta always exactly equals (rounded sats - rounded ims)
+    instead of drifting a cent off from rounding a separately-averaged
+    delta on its own."""
+    sats_r = round2(s["avg_rpd_sats_pct"])
+    ims_r = round2(s["avg_rpd_ims_pct"])
+    delta_r = round2(sats_r - ims_r) if sats_r is not None and ims_r is not None else None
+    return {
+        "avg_rpd_sats_pct": sats_r, "avg_cv_sats_pct": round2(s["avg_cv_sats_pct"]),
+        "avg_rpd_ims_pct": ims_r, "avg_cv_ims_pct": round2(s["avg_cv_ims_pct"]),
+        "avg_delta_rpd_pct": delta_r,
+    }
+
+
 def pipeline_view(row, pipeline: str):
     """Extract the sats-only or ims-only columns of a combined row, in the
     single-pipeline shape (instance, runs, avg_result, bks, avg_rpd_pct,
@@ -274,9 +294,10 @@ def main():
         if s is overall_row:
             print("-" * 111)
         ims_wins_str = fmt_fraction(s["ims_wins_count"], s["ims_wins_total"])
-        print(f"{s['n']:<8}{fmt(s['avg_rpd_sats_pct'], 3):>17}{fmt(s['avg_cv_sats_pct'], 3):>16}"
-              f"{fmt(s['avg_rpd_ims_pct'], 3):>16}{fmt(s['avg_cv_ims_pct'], 3):>15}"
-              f"{fmt(s['avg_delta_rpd_pct'], 3):>18}{ims_wins_str:>10}")
+        rs = rounded_summary(s)
+        print(f"{s['n']:<8}{fmt(rs['avg_rpd_sats_pct'], 2):>17}{fmt(rs['avg_cv_sats_pct'], 2):>16}"
+              f"{fmt(rs['avg_rpd_ims_pct'], 2):>16}{fmt(rs['avg_cv_ims_pct'], 2):>15}"
+              f"{fmt(rs['avg_delta_rpd_pct'], 2):>18}{ims_wins_str:>10}")
 
     if args.no_save:
         return
@@ -299,7 +320,7 @@ def main():
     # ---- Save: one combined summary.csv (per-n comparison) in outputs/ ----
     summary_path = outputs_root / "summary.csv"
     summary_csv_rows = [
-        {**{k: v for k, v in s.items() if k not in ("ims_wins_count", "ims_wins_total")},
+        {"n": s["n"], **rounded_summary(s),
          "ims_wins": fmt_fraction(s["ims_wins_count"], s["ims_wins_total"])}
         for s in summary_rows
     ]

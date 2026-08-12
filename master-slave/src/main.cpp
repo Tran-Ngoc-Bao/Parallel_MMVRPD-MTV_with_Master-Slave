@@ -6,12 +6,49 @@
 #include <iomanip>
 #include <nlohmann/json.hpp>
 #include <mpi.h>
+#include <sched.h>
 
 #include "cli.hpp"
 #include "config.hpp"
 #include "parallel.hpp"
 #include "solutions.hpp"
 #include "logger.hpp"
+
+// i5-14400F: 6 P-cores (SMT pairs) + 4 E-cores (no SMT).
+static constexpr int P_CORE_FIRST[] = {0, 2, 4, 6, 8, 10};
+static constexpr int P_CORE_COUNT   = 6;
+static constexpr int E_CORE[]       = {12, 13, 14, 15};
+static constexpr int E_CORE_COUNT   = 4;
+
+static void pin_process(int cpu)
+{
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(cpu, &set);
+    if (sched_setaffinity(0, sizeof(set), &set) != 0) {
+        std::cerr << "Warning: failed to pin process to CPU " << cpu << "\n";
+    }
+}
+
+// Workers get a dedicated non-SMT P-core each; master takes a leftover
+// P-core, or an E-core once workers have claimed all of them.
+static void pin_to_cores(int rank, int world_size)
+{
+    int num_workers = world_size - 1;
+    if (rank == 0) {
+        if (num_workers < P_CORE_COUNT) pin_process(P_CORE_FIRST[num_workers]);
+        else                            pin_process(E_CORE[0]);
+        return;
+    }
+    int worker_idx = rank - 1;
+    if (worker_idx < P_CORE_COUNT) {
+        pin_process(P_CORE_FIRST[worker_idx]);
+    } else if (worker_idx < P_CORE_COUNT * 2) {
+        pin_process(P_CORE_FIRST[worker_idx - P_CORE_COUNT] + 1);
+    } else {
+        pin_process(E_CORE[(worker_idx - P_CORE_COUNT * 2) % E_CORE_COUNT]);
+    }
+}
 
 int main(int argc, char** argv)
 {
@@ -155,6 +192,7 @@ int main(int argc, char** argv)
     int world_size = 1;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    pin_to_cores(rank, world_size);
 
     if (run_cmd->parsed()) {
         args.cmd = cli::CommandType::Run;

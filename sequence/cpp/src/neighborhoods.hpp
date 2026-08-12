@@ -16,10 +16,6 @@ enum class Neighborhood {
     EjectionChain
 };
 
-// Number of distinct Neighborhood values (used to size per-neighborhood
-// evaluation-count arrays).
-inline constexpr std::size_t NEIGHBORHOOD_COUNT = 7;
-
 inline std::string neighborhood_to_str(Neighborhood n) {
     switch(n) {
         case Neighborhood::Move10:        return "Move (1, 0)";
@@ -34,13 +30,7 @@ inline std::string neighborhood_to_str(Neighborhood n) {
 }
 
 // -----------------------------------------------------------------------
-// TabuSet – same externally-observable behavior as the previous
-// std::vector<std::vector<size_t>> tabu list (insertion-ordered, FIFO
-// eviction, "touch" rotates an existing entry to the back), but backed by
-// an unordered_set for O(1) membership testing instead of a linear
-// std::find. Membership checks happen once per *candidate* (hot path,
-// millions of calls); touch() happens once per neighborhood *selection*
-// (thousands of calls), so it is fine for touch() to remain O(tabu_size).
+// TabuSet
 // -----------------------------------------------------------------------
 struct VectorSizeTHash {
     std::size_t operator()(const std::vector<size_t>& v) const noexcept {

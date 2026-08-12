@@ -12,7 +12,6 @@
 #include <iostream>
 #include <cassert>
 #include <cmath>
-#include <array>
 
 // -----------------------------------------------------------------------
 // Penalty coefficients
@@ -128,14 +127,6 @@ Solution Solution::make(
 
 // -----------------------------------------------------------------------
 // Solution::update_delta_inplace
-//
-// Hot-path counterpart to make(): reuses `scratch`'s already-allocated
-// vectors (no heap allocation here as long as vehicle counts match base's,
-// which they always do for the move types this is used from) and, per
-// vehicle, only re-derives working_time/violations when that vehicle's
-// route list actually changed vs `base` (LocalRc pointer comparison, O(1)
-// per route, no virtual calls). Unchanged vehicles copy their cached value
-// from `base` instead.
 // -----------------------------------------------------------------------
 void Solution::update_delta_inplace(
     Solution& scratch,
@@ -806,8 +797,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
     std::vector<TabuSet> tabu_lists(NUM_NEIGHBORHOODS);
     size_t neighborhood_idx = 0;
     size_t last_improved    = 0;
-    std::array<std::size_t, NEIGHBORHOOD_COUNT> neighborhood_evals{};
-    std::array<std::size_t, NEIGHBORHOOD_COUNT> neighborhood_selects{};
+    std::size_t total_evals = 0;
 
     auto record_new = [&](const Solution& nb, size_t iteration, size_t segment) {
         if (nb.cost() + TOLERANCE < result.cost() && nb.feasible) {
@@ -853,6 +843,10 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
     auto search_start = std::chrono::steady_clock::now();
 
     for (size_t iteration = 1; iteration <= max_iter; ++iteration) {
+        // Stop-condition priority: max-evaluations, then time-limit, then
+        // non-improving segments (checked further below via elite_set).
+        if (cfg.max_evaluations > 0 && total_evals >= cfg.max_evaluations) break;
+
         if (cfg.time_limit > 0.0) {
             double elapsed = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - search_start).count();
@@ -897,8 +891,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
         bool found = neighborhoods::search(
             nb, current, tabu_lists[neighborhood_idx],
             tabu_sz, result.cost(), neighbor, nb_evals);
-        neighborhood_evals[static_cast<std::size_t>(nb)]   += nb_evals;
-        neighborhood_selects[static_cast<std::size_t>(nb)] += 1;
+        total_evals += nb_evals;
 
         if (found) {
             if (neighbor.feasible) {
@@ -944,10 +937,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
             adaptive.weights.assign(NUM_NEIGHBORHOODS, 1.0);
 
             if (elite_set.empty()) {
-                // With a time limit, keep the search alive past segment
-                // exhaustion by reseeding from the best solution found so
-                // far instead of terminating.
-                if (cfg.time_limit > 0.0) elite_set.push_back(result);
+                if (cfg.max_evaluations > 0 || cfg.time_limit > 0.0) elite_set.push_back(result);
                 else break;
             }
 
@@ -966,8 +956,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
                 bool ec_found = neighborhoods::search(
                     Neighborhood::EjectionChain, current, ec_tabu,
                     cfg.ejection_chain_iterations + 1, result.cost(), ec_neighbor, ec_evals);
-                neighborhood_evals[static_cast<std::size_t>(Neighborhood::EjectionChain)]   += ec_evals;
-                neighborhood_selects[static_cast<std::size_t>(Neighborhood::EjectionChain)] += 1;
+                total_evals += ec_evals;
                 if (ec_found) {
                     current = ec_neighbor;
                     record_new(current, iteration, adaptive.segment);
@@ -1023,6 +1012,6 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
 
     logger.finalize(result, tabu_sz, reset_after, adap_its,
                     adaptive.segment, last_improved,
-                    post_opt, post_opt_elapsed, neighborhood_evals, neighborhood_selects);
+                    post_opt, post_opt_elapsed, total_evals);
     return result;
 }

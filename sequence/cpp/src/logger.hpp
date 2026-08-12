@@ -3,7 +3,6 @@
 #include <fstream>
 #include <chrono>
 #include <optional>
-#include <array>
 #include "neighborhoods.hpp"
 
 struct Solution;
@@ -31,6 +30,5 @@ struct Logger {
                   size_t last_improved,
                   double post_optimization,
                   double post_optimization_elapsed,
-                  const std::array<std::size_t, NEIGHBORHOOD_COUNT>& neighborhood_evaluations = {},
-                  const std::array<std::size_t, NEIGHBORHOOD_COUNT>& neighborhood_selections = {});
+                  std::size_t total_evaluations = 0);
 };

@@ -1,0 +1,31 @@
+outputs: /home/bao/Documents/github/Parallel_MMVRPD-MTV_with_Master-Slave/master-slave/outputs/exp2/a
+bks:     /home/bao/Documents/github/Parallel_MMVRPD-MTV_with_Master-Slave/bks
+
+Instance    Push                Runs    PushRate  Reduct(%)  Accept(%)     R2(%)     R4(%)     R8(%)   irpd(%)
+--------------------------------------------------------------------------------------------------------------
+200.10.2    new-best               3       3.705      0.000     82.432     1.271     0.346    -0.342     2.276
+200.10.2    segment-best           3       0.036     99.018     96.850     1.771     0.346    -0.342    15.455
+200.10.2    significant-best       3       2.003     45.927     83.462     1.435     0.387    -0.342     2.213
+200.40.1    new-best               3       4.437      0.000     81.097     0.311     0.021    -0.307     3.448
+200.40.1    segment-best           3       0.031     99.309     99.065     0.311     0.027    -0.307     9.567
+200.40.1    significant-best       3       2.080     53.114     81.459     0.343     0.062    -0.307     3.410
+500.10.2    new-best               3       0.530      0.000    100.000     0.964    -0.057    -0.746     0.977
+500.10.2    segment-best           3       0.004     99.157    100.000     1.158     0.072    -0.746     6.047
+500.10.2    significant-best       3       0.137     74.207     99.985     0.971     0.000    -0.746     1.022
+500.40.1    new-best               3       1.245      0.000    100.000     1.139     0.470    -0.041     5.359
+500.40.1    segment-best           3       0.004     99.706    100.000     1.258     0.470    -0.041    11.007
+500.40.1    significant-best       3       0.254     79.580     99.992     1.173     0.525    -0.041     5.425
+1000.10.2   new-best               2       0.294      0.000    100.000     1.230    -1.219    -1.572     1.065
+1000.10.2   segment-best           0           -          -          -         -         -         -         -
+1000.10.2   significant-best       0           -          -          -         -         -         -         -
+1000.40.1   new-best               0           -          -          -         -         -         -         -
+1000.40.1   segment-best           0           -          -          -         -         -         -         -
+1000.40.1   significant-best       0           -          -          -         -         -         -         -
+
+Note: fewer runs found than expected for: 1000.10.2/new-best (2/3), 1000.10.2/segment-best (0/3), 1000.10.2/significant-best (0/3), 1000.40.1/new-best (0/3), 1000.40.1/segment-best (0/3), 1000.40.1/significant-best (0/3)
+
+PushStrategy          PushRate  Reduct(%)  Accept(%)     R2(%)     R4(%)     R8(%)   irpd(%)
+--------------------------------------------------------------------------------------------
+new-best                 2.042      0.000     92.706     0.983    -0.088    -0.602     2.625
+segment-best             0.019     99.298     98.979     1.125     0.229    -0.359    10.519
+significant-best         1.119     63.207     91.225     0.981     0.244    -0.359     3.017

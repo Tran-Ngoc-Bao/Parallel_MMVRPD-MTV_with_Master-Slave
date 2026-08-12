@@ -1113,23 +1113,12 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
 
     if (cfg.verbose) std::cerr << "\n";
 
+    // Budget exhausted: push the final personal best regardless of push
+    // strategy if it's better than the last elite we pushed, so the final
+    // archive never misses it just because a threshold/segment never came.
     if (hooks && hooks->push_elite && result.cost() + TOLERANCE < last_pushed_cost) {
-        bool should_push_final = false;
-        switch (cfg.elite_push_strategy) {
-            case cli::ElitePushStrategy::NewBest:
-            case cli::ElitePushStrategy::SegmentBest:
-                should_push_final = true;
-                break;
-            case cli::ElitePushStrategy::SignificantBest:
-                should_push_final = last_pushed_cost <= 0.0
-                    || (last_pushed_cost - result.cost()) / last_pushed_cost
-                           >= SIGNIFICANT_PUSH_RELATIVE_THRESHOLD;
-                break;
-        }
-        if (should_push_final) {
-            hooks->push_elite(last_improved, result);
-            last_pushed_cost = result.cost();
-        }
+        hooks->push_elite(last_improved, result);
+        last_pushed_cost = result.cost();
     }
 
     // post_optimization stub (not implemented, matches Rust comment-out)

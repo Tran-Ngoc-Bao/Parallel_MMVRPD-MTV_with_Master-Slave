@@ -37,5 +37,8 @@ struct Logger {
                   std::size_t total_elite_pushes = 0,
                   std::size_t accepted_elite_pushes = 0,
                   std::size_t evaluation_checkpoint_budget = 0,
-                  const std::vector<double>& best_cost_by_evaluation_checkpoint = {});
+                  const std::vector<double>& best_cost_by_evaluation_checkpoint = {},
+                  std::size_t elite_pool_size = 0,
+                  double elite_pool_diversity = 0.0,
+                  const std::vector<double>& elite_pool_costs = {});
 };

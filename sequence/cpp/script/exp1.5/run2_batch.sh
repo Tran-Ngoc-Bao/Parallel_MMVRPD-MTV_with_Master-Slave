@@ -2,12 +2,11 @@
 set -euo pipefail
 export LC_NUMERIC=C
 
-# Format per line: "N  MAX_EVALUATIONS" (MAX_EVALUATIONS: 0 = unlimited,
-# run until the adaptive-search stopping criteria instead). Edit these to
-# the evaluations budget you want for each customer count.
+# Format per line: "N  MAX_EVALUATIONS"
 JOBS=(
     "200   194000000"
     "500   2758000000"
+    "1000  13416000000"
 )
 
 # Usage:

@@ -374,6 +374,39 @@ struct ElitePool {
         return m;
     }
 
+    std::size_t size() const
+    {
+        return solutions.size();
+    }
+
+    std::vector<double> costs() const
+    {
+        std::vector<double> result;
+        result.reserve(solutions.size());
+        for (const auto& e : solutions) result.push_back(e.sol.cost());
+        return result;
+    }
+
+    // Average pairwise Hamming distance across all elites currently in the
+    // pool: div = 2/(m*(m-1)) * sum over all C(m,2) pairs.
+    // Normalized to [0,1] by customers_count
+    double diversity() const
+    {
+        const std::size_t m = solutions.size();
+        if (m < 2) return 0.0;
+        const std::size_t customers_count = global_config().customers_count;
+        if (customers_count == 0) return 0.0;
+
+        std::size_t sum = 0;
+        for (std::size_t i = 0; i < m; ++i) {
+            for (std::size_t j = i + 1; j < m; ++j) {
+                sum += solutions[i].sol.hamming_distance(solutions[j].sol);
+            }
+        }
+        return 2.0 * static_cast<double>(sum)
+             / (static_cast<double>(m) * static_cast<double>(m - 1) * static_cast<double>(customers_count));
+    }
+
     const Solution& pick_for_dispatch(int excluded_worker, std::mt19937& rng, cli::ElitePullStrategy strategy)
     {
         std::vector<std::size_t> candidates;
@@ -526,7 +559,9 @@ Solution run_master(int world_size)
             capture_checkpoint(0);
             next_checkpoint = 1;
         }
-        while (next_checkpoint <= 8 &&
+        // Checkpoint 8 excluded here -- left to the post-loop catch-up so
+        // it always reflects the true final best_solution.
+        while (next_checkpoint <= 7 &&
                running_total >= evaluation_budget * next_checkpoint / 8) {
             capture_checkpoint(next_checkpoint);
             ++next_checkpoint;
@@ -691,7 +726,8 @@ Solution run_master(int world_size)
     logger.finalize(best_solution, 0, 0, 0, 0, 0, 0.0, 0.0,
                      total_evaluations, total_push_count, accepted_push_count,
                      evaluation_budget,
-                     evaluation_budget > 0 ? best_cost_by_checkpoint : std::vector<double>{});
+                     evaluation_budget > 0 ? best_cost_by_checkpoint : std::vector<double>{},
+                     elite_pool.size(), elite_pool.diversity(), elite_pool.costs());
     return best_solution;
 }
 
