@@ -36,6 +36,7 @@ constexpr int TAG_ELITE_PULL = 105;  // worker -> master: pull request
 constexpr int TAG_ELITE_REPLY = 106; // master -> worker: reply to pull request
 constexpr int TAG_STATS = 107;       // worker -> master: total evaluations and elite-push counts
 constexpr int TAG_EVAL_PROGRESS = 108; // worker -> master: running evaluations count (sent alongside elite pushes)
+constexpr double TOLERANCE = 0.001; // matches solutions.cpp; only for best_solution updates
 
 void send_string_impl(int dest, int tag, const std::string& payload)
 {
@@ -541,22 +542,33 @@ Solution run_master(int world_size)
     std::size_t next_checkpoint = 0;
     std::vector<double> best_cost_by_checkpoint(9, 0.0);
     std::vector<bool> checkpoint_captured(9, false);
+    std::size_t best_solution_evaluations = 0;
 
+    auto current_running_total = [&]() {
+        std::size_t total = 0;
+        for (int r = 1; r < world_size; ++r) total += latest_worker_evals[static_cast<std::size_t>(r)];
+        return total;
+    };
+
+    auto record_new_best = [&]() {
+        best_solution_evaluations = current_running_total();
+    };
+
+    // Guards against an empty pool (best_cost() == +infinity, which would
+    // serialize as JSON null) -- skips and retries on a later call instead.
     auto capture_checkpoint = [&](std::size_t idx) {
-        if (checkpoint_captured[idx]) return;
+        if (checkpoint_captured[idx] || elite_pool.empty()) return;
         best_cost_by_checkpoint[idx] = elite_pool.best_cost();
         checkpoint_captured[idx] = true;
     };
 
     auto capture_due_checkpoints = [&]() {
         if (evaluation_budget == 0) return;
-        std::size_t running_total = 0;
-        for (int r = 1; r < world_size; ++r) {
-            running_total += latest_worker_evals[static_cast<std::size_t>(r)];
-        }
+        std::size_t running_total = current_running_total();
         if (next_checkpoint == 0) {
             if (running_total == 0) return;
             capture_checkpoint(0);
+            if (!checkpoint_captured[0]) return;  // pool still empty, retry later
             next_checkpoint = 1;
         }
         // Checkpoint 8 excluded here -- left to the post-loop catch-up so
@@ -625,8 +637,9 @@ Solution run_master(int world_size)
             processed = true;
             const int worker_rank = status.MPI_SOURCE;
             Solution elite = recv_solution(worker_rank, TAG_ELITE_PUSH);
-            if (elite.cost() < best_solution.cost()) {
+            if (elite.cost() + TOLERANCE < best_solution.cost()) {
                 best_solution = elite;
+                record_new_best();
             }
             if (elite_pool.consider(std::move(elite), worker_rank, elite_replace_strategy)) {
                 ++accepted_push_count;
@@ -684,7 +697,8 @@ Solution run_master(int world_size)
             processed = true;
             const int worker_rank = status.MPI_SOURCE;
             Solution result = recv_solution(worker_rank, TAG_RESULT);
-            if (result.cost() < best_solution.cost()) {
+            bool result_is_new_best = result.cost() + TOLERANCE < best_solution.cost();
+            if (result_is_new_best) {
                 best_solution = result;
             }
             elite_pool.consider(std::move(result), worker_rank, elite_replace_strategy);
@@ -695,6 +709,7 @@ Solution run_master(int world_size)
             total_evaluations += worker_evaluations;
             total_push_count  += worker_push_count;
             latest_worker_evals[static_cast<std::size_t>(worker_rank)] = worker_evaluations;
+            if (result_is_new_best) record_new_best();
             capture_due_checkpoints();
 
             worker_running[static_cast<std::size_t>(worker_rank)] = false;
@@ -727,7 +742,8 @@ Solution run_master(int world_size)
                      total_evaluations, total_push_count, accepted_push_count,
                      evaluation_budget,
                      evaluation_budget > 0 ? best_cost_by_checkpoint : std::vector<double>{},
-                     elite_pool.size(), elite_pool.diversity(), elite_pool.costs());
+                     elite_pool.size(), elite_pool.diversity(), elite_pool.costs(),
+                     best_solution_evaluations);
     return best_solution;
 }
 

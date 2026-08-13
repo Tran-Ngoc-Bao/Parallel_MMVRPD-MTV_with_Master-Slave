@@ -4,18 +4,14 @@ Statistics for run2.sh (exp2/b, elite_pool_factor comparison).
 
 Compares 3 elite_pool_factor values (0.02, 0.06, 0.10), all run with
 elite-pull off, significant-best push strategy, and similarity-quality
-pool replacement. For each value reports:
-  - push rate: total_elite_pushes per 1,000,000 total_evaluations
-  - accept (%): accepted_elite_pushes / total_elite_pushes
-  - R2, R4, R8: RPD (%) of best_cost_by_evaluation_checkpoint at 2/8,
-    4/8, 8/8 of the evaluation budget, vs BKS working_time
-  - irpd (%): trapezoidal-rule average of R0..R8:
-    (1/8) * [(R0+R8)/2 + R1+...+R7]
+pool replacement. For each value reports, from the elite pool still held
+at program end:
+  - pool size: elite_pool_size
+  - pool RPD (%): mean RPD (%) of elite_pool_costs vs BKS working_time
+  - pool diversity: elite_pool_diversity (normalized to [0,1] by
+    customers_count)
 
-RPD (%) = (value - BKS) / BKS * 100, same as exp1.5/stats.py. The
-"value" is the tracked cost at that checkpoint, which can carry an
-infeasibility penalty at early checkpoints if the best-known solution
-isn't yet feasible at that point.
+RPD (%) = (value - BKS) / BKS * 100, same as exp1.5/stats.py.
 
 Aggregation: for each (n, combo) instance, each pool_factor's numbers
 are averaged over its runs first; each pool_factor's final numbers are
@@ -39,7 +35,6 @@ import statistics
 from pathlib import Path
 
 POOL_FACTORS = ["0.02", "0.06", "0.10"]
-NUM_CHECKPOINTS = 9  # R0..R8, at k/8 of the evaluation budget
 
 
 def load_run(path: Path):
@@ -73,13 +68,6 @@ def rpd_pct(value, bks_value):
     return (value - bks_value) / bks_value * 100.0
 
 
-def irpd_pct(r):
-    """Trapezoidal-rule average of r[0..8] over the 8 intervals."""
-    if any(v is None for v in r):
-        return None
-    return ((r[0] + r[8]) / 2.0 + sum(r[1:8])) / 8.0
-
-
 def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expected_runs: int):
     instance = f"{n}.{combo}"
     bks_path = bks_dir / n / f"{instance}-bks.json"
@@ -90,44 +78,35 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
     for pool_factor in POOL_FACTORS:
         run_files = find_run_files(outputs_dir, n, instance, pool_factor)
 
-        pushes, accepted_pushes, evals, checkpoints_per_run = [], [], [], []
+        pool_sizes, pool_diversities, pool_mean_costs = [], [], []
         for run_id, path in run_files:
             data = load_run(path)
-            p = data["total_elite_pushes"]
-            a = data["accepted_elite_pushes"]
-            e = data["total_evaluations"]
-            cps = data["best_cost_by_evaluation_checkpoint"]
-            pushes.append(p)
-            accepted_pushes.append(a)
-            evals.append(e)
-            if len(cps) == NUM_CHECKPOINTS:
-                checkpoints_per_run.append(cps)
+            pool_size = data["elite_pool_size"]
+            pool_diversity = data["elite_pool_diversity"]
+            pool_costs = data["elite_pool_costs"]
+            pool_mean_cost = statistics.mean(pool_costs) if pool_costs else None
+
+            pool_sizes.append(pool_size)
+            pool_diversities.append(pool_diversity)
+            if pool_mean_cost is not None:
+                pool_mean_costs.append(pool_mean_cost)
+
             detail_rows.append({
                 "n": n, "instance": instance, "pool_factor": pool_factor, "run": run_id,
-                "total_elite_pushes": p, "accepted_elite_pushes": a, "total_evaluations": e,
-                "push_rate_per_million_evals": p / e * 1e6 if e else None,
-                "accept_pct": a / p * 100.0 if p else None,
+                "elite_pool_size": pool_size, "elite_pool_diversity": pool_diversity,
+                "elite_pool_rpd_pct": rpd_pct(pool_mean_cost, bks_value),
             })
 
-        avg_pushes = statistics.mean(pushes) if pushes else None
-        avg_accepted = statistics.mean(accepted_pushes) if accepted_pushes else None
-        avg_evals = statistics.mean(evals) if evals else None
-        push_rate = (avg_pushes / avg_evals * 1e6) if avg_pushes is not None and avg_evals else None
-        accept_pct = (avg_accepted / avg_pushes * 100.0) if avg_accepted is not None and avg_pushes else None
-
-        r = [None] * NUM_CHECKPOINTS
-        if checkpoints_per_run:
-            avg_checkpoints = [statistics.mean(vals) for vals in zip(*checkpoints_per_run)]
-            r = [rpd_pct(v, bks_value) for v in avg_checkpoints]
+        avg_pool_size = statistics.mean(pool_sizes) if pool_sizes else None
+        avg_pool_diversity = statistics.mean(pool_diversities) if pool_diversities else None
+        avg_pool_mean_cost = statistics.mean(pool_mean_costs) if pool_mean_costs else None
 
         summary_rows.append({
             "n": n, "instance": instance, "pool_factor": pool_factor,
             "bks": bks_value, "runs": len(run_files), "expected_runs": expected_runs,
-            "push_rate_per_million_evals": push_rate,
-            "accept_pct": accept_pct,
-            "R0": r[0], "R1": r[1], "R2": r[2], "R3": r[3], "R4": r[4],
-            "R5": r[5], "R6": r[6], "R7": r[7], "R8": r[8],
-            "irpd_pct": irpd_pct(r),
+            "elite_pool_size": avg_pool_size,
+            "elite_pool_rpd_pct": rpd_pct(avg_pool_mean_cost, bks_value),
+            "elite_pool_diversity": avg_pool_diversity,
         })
     return summary_rows, detail_rows
 
@@ -190,28 +169,24 @@ def main():
             detail_rows.extend(d)
 
     # ---- Per-instance-per-pool_factor summary ----
-    header = (f"{'Instance':<12}{'Pool':<8}{'Runs':>6}{'PushRate':>12}"
-              f"{'Accept(%)':>11}"
-              f"{'R2(%)':>10}{'R4(%)':>10}{'R8(%)':>10}{'irpd(%)':>10}")
+    header = (f"{'Instance':<12}{'Pool':<8}{'Runs':>6}"
+              f"{'PoolSz':>8}{'PoolRPD(%)':>12}{'PoolDiv':>9}")
     out(header)
     out("-" * len(header))
     incomplete = []
     for r in summary_rows:
         out(f"{r['instance']:<12}{r['pool_factor']:<8}{r['runs']:>6}"
-            f"{fmt(r['push_rate_per_million_evals'], 3):>12}"
-            f"{fmt(r['accept_pct'], 3):>11}"
-            f"{fmt(r['R2'], 3):>10}{fmt(r['R4'], 3):>10}{fmt(r['R8'], 3):>10}"
-            f"{fmt(r['irpd_pct'], 3):>10}")
+            f"{fmt(r['elite_pool_size'], 2):>8}{fmt(r['elite_pool_rpd_pct'], 3):>12}"
+            f"{fmt(r['elite_pool_diversity'], 3):>9}")
         if r["runs"] < r["expected_runs"]:
             incomplete.append(f"{r['instance']}/pool{r['pool_factor']} ({r['runs']}/{r['expected_runs']})")
     if incomplete:
         out(f"\nNote: fewer runs found than expected for: {', '.join(incomplete)}")
 
     # ---- Aggregate: instance -> pool_factor (avg over instances) ----
-    out(f"\n{'PoolFactor':<8}{'PushRate':>12}{'Accept(%)':>11}"
-        f"{'R2(%)':>10}{'R4(%)':>10}{'R8(%)':>10}{'irpd(%)':>10}")
-    out("-" * 71)
-    strategy_rows = []
+    out(f"\n{'PoolFactor':<8}{'PoolSz':>8}{'PoolRPD(%)':>12}{'PoolDiv':>9}")
+    out("-" * 37)
+    pool_factor_rows = []
     for pool_factor in POOL_FACTORS:
         rows = [r for r in summary_rows if r["pool_factor"] == pool_factor]
 
@@ -219,18 +194,16 @@ def main():
             vals = [r[f] for r in rows if r[f] is not None]
             return statistics.mean(vals) if vals else None
 
-        strategy_row = {
+        pool_factor_row = {
             "pool_factor": pool_factor,
-            "push_rate_per_million_evals": avg_field("push_rate_per_million_evals"),
-            "accept_pct": avg_field("accept_pct"),
-            "R2": avg_field("R2"), "R4": avg_field("R4"), "R8": avg_field("R8"),
-            "irpd_pct": avg_field("irpd_pct"),
+            "elite_pool_size": avg_field("elite_pool_size"),
+            "elite_pool_rpd_pct": avg_field("elite_pool_rpd_pct"),
+            "elite_pool_diversity": avg_field("elite_pool_diversity"),
         }
-        strategy_rows.append(strategy_row)
-        out(f"{pool_factor:<8}{fmt(strategy_row['push_rate_per_million_evals'], 3):>12}"
-            f"{fmt(strategy_row['accept_pct'], 3):>11}"
-            f"{fmt(strategy_row['R2'], 3):>10}{fmt(strategy_row['R4'], 3):>10}"
-            f"{fmt(strategy_row['R8'], 3):>10}{fmt(strategy_row['irpd_pct'], 3):>10}")
+        pool_factor_rows.append(pool_factor_row)
+        out(f"{pool_factor:<8}{fmt(pool_factor_row['elite_pool_size'], 2):>8}"
+            f"{fmt(pool_factor_row['elite_pool_rpd_pct'], 3):>12}"
+            f"{fmt(pool_factor_row['elite_pool_diversity'], 3):>9}")
 
     report = "\n".join(lines)
     print(report)
@@ -248,13 +221,13 @@ def main():
         write_csv(summary_path, summary_rows)
         saved.append(summary_path)
     if detail_rows:
-        detail_path = outputs_dir / "detail_push.csv"
+        detail_path = outputs_dir / "detail_pool.csv"
         write_csv(detail_path, detail_rows)
         saved.append(detail_path)
-    if strategy_rows:
-        strategy_path = outputs_dir / "pool_factor_summary.csv"
-        write_csv(strategy_path, strategy_rows)
-        saved.append(strategy_path)
+    if pool_factor_rows:
+        pool_factor_path = outputs_dir / "pool_factor_summary.csv"
+        write_csv(pool_factor_path, pool_factor_rows)
+        saved.append(pool_factor_path)
 
     print("\nSaved:")
     for p in saved:

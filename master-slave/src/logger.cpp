@@ -167,7 +167,8 @@ void Logger::finalize(const Solution& result,
                       const std::vector<double>& best_cost_by_evaluation_checkpoint,
                       std::size_t elite_pool_size,
                       double elite_pool_diversity,
-                      const std::vector<double>& elite_pool_costs)
+                      const std::vector<double>& elite_pool_costs,
+                      std::size_t best_solution_evaluations)
 {
     this->total_evaluations = total_evaluations;
 
@@ -204,6 +205,10 @@ void Logger::finalize(const Solution& result,
     run["elite_pool_size"]                     = elite_pool_size;
     run["elite_pool_diversity"]                = elite_pool_diversity;
     run["elite_pool_costs"]                    = elite_pool_costs;
+    run["best_solution_evaluations"]           = best_solution_evaluations;
+    run["best_solution_evaluations_percent"]   = evaluation_checkpoint_budget > 0
+        ? 100.0 * static_cast<double>(best_solution_evaluations) / static_cast<double>(evaluation_checkpoint_budget)
+        : 0.0;
 
     fs::path out(_outputs);
 

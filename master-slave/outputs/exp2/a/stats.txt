@@ -15,17 +15,17 @@ Instance    Push                Runs    PushRate  Reduct(%)  Accept(%)     R2(%)
 500.40.1    new-best               3       1.245      0.000    100.000     1.139     0.470    -0.041     5.359
 500.40.1    segment-best           3       0.004     99.706    100.000     1.258     0.470    -0.041    11.007
 500.40.1    significant-best       3       0.254     79.580     99.992     1.173     0.525    -0.041     5.425
-1000.10.2   new-best               2       0.294      0.000    100.000     1.230    -1.219    -1.572     1.065
-1000.10.2   segment-best           0           -          -          -         -         -         -         -
+1000.10.2   new-best               3       0.324      0.000    100.000     1.351    -0.727    -1.310     1.530
+1000.10.2   segment-best           3       0.001     99.582    100.000     1.609    -0.629    -1.310     7.269
 1000.10.2   significant-best       0           -          -          -         -         -         -         -
 1000.40.1   new-best               0           -          -          -         -         -         -         -
 1000.40.1   segment-best           0           -          -          -         -         -         -         -
 1000.40.1   significant-best       0           -          -          -         -         -         -         -
 
-Note: fewer runs found than expected for: 1000.10.2/new-best (2/3), 1000.10.2/segment-best (0/3), 1000.10.2/significant-best (0/3), 1000.40.1/new-best (0/3), 1000.40.1/segment-best (0/3), 1000.40.1/significant-best (0/3)
+Note: fewer runs found than expected for: 1000.10.2/significant-best (0/3), 1000.40.1/new-best (0/3), 1000.40.1/segment-best (0/3), 1000.40.1/significant-best (0/3)
 
 PushStrategy          PushRate  Reduct(%)  Accept(%)     R2(%)     R4(%)     R8(%)   irpd(%)
 --------------------------------------------------------------------------------------------
-new-best                 2.042      0.000     92.706     0.983    -0.088    -0.602     2.625
-segment-best             0.019     99.298     98.979     1.125     0.229    -0.359    10.519
+new-best                 2.048      0.000     92.706     1.007     0.010    -0.549     2.718
+segment-best             0.015     99.354     99.183     1.221     0.057    -0.549     9.869
 significant-best         1.119     63.207     91.225     0.981     0.244    -0.359     3.017
