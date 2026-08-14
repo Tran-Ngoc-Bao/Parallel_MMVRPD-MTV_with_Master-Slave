@@ -19,7 +19,7 @@ MAX_EVALUATIONS="${5:-0}"
 ADAPTIVE_ITERATIONS="60"
 ELITE_PUSH_STRATEGY="new-best"
 ELITE_REPLACE_STRATEGY="similarity-quality"
-ELITE_POOL_FACTOR="0.06"
+ELITE_POOL_FACTOR="0.04"
 
 # Compare the 4 non-off pull strategies, RUNS runs each
 PULL_STRATEGIES=("random" "topk" "rank" "pullcount")

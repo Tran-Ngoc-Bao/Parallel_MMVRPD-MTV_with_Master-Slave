@@ -48,7 +48,7 @@ struct Solution {
     bool   feasible               = false;
 
     struct EliteHooks {
-        std::function<void(std::size_t iteration, const Solution& elite)> push_elite;
+        std::function<void(const Solution& elite)> push_elite;
         std::function<bool(std::size_t iteration, Solution& pulled_elite)> pull_elite;
         std::function<bool()> should_stop;
         std::function<void(std::size_t total_evaluations)> report_progress;

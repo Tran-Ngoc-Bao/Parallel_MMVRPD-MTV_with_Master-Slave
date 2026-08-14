@@ -163,7 +163,7 @@ def write_csv(path: Path, rows):
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--outputs", default="../../../outputs/exp2/a",
+    ap.add_argument("--outputs", default="../../../outputs/exp2/a-m",
                      help="Dir containing run2.sh output, relative to this script "
                           "(default: ../../../outputs/exp2/a)")
     ap.add_argument("--bks", default="../../../../bks",

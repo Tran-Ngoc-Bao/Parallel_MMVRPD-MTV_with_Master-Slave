@@ -34,7 +34,7 @@ import re
 import statistics
 from pathlib import Path
 
-POOL_FACTORS = ["0.02", "0.06", "0.10"]
+POOL_FACTORS = ["0.02", "0.04", "0.06", "0.10"]
 
 
 def load_run(path: Path):

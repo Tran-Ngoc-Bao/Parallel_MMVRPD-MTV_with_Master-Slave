@@ -819,35 +819,39 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
 
     double last_pushed_cost = root.cost();
     if (hooks && hooks->push_elite) {
-        hooks->push_elite(0, root);
+        hooks->push_elite(root);
     }
 
-    auto record_new = [&](const Solution& nb, size_t iteration, size_t segment) {
+    auto record_new = [&](const Solution& nb, size_t iteration, size_t segment, bool allow_push = true) {
         if (nb.cost() + TOLERANCE < result.cost() && nb.feasible) {
             result       = nb;
             last_improved = iteration;
             adaptive.last_improved_seg = segment;
 
-            for (const auto& routes : nb.truck_routes)
-                for (const auto& r : routes) {
-                    const auto& c = r->data().customers;
-                    for (size_t i = 0; i+1 < c.size(); ++i)
-                        edge_records[c[i]][c[i+1]] =
-                            std::min(edge_records[c[i]][c[i+1]], nb.working_time);
-                }
-
-            if (cfg.max_elite_size > 0) {
-                if (elite_set.size() == cfg.max_elite_size) {
-                    // Remove least diverse
-                    size_t min_idx = 0;
-                    size_t min_hd  = elite_set[0].hamming_distance(result);
-                    for (size_t i = 1; i < elite_set.size(); ++i) {
-                        size_t hd = elite_set[i].hamming_distance(result);
-                        if (hd < min_hd) { min_hd = hd; min_idx = i; }
+            // edge_records/elite_set only feed destroy_and_repair, which never
+            // runs under Adaptive -- skip updating them in that case.
+            if (cfg.strategy != cli::Strategy::Adaptive) {
+                for (const auto& routes : nb.truck_routes)
+                    for (const auto& r : routes) {
+                        const auto& c = r->data().customers;
+                        for (size_t i = 0; i+1 < c.size(); ++i)
+                            edge_records[c[i]][c[i+1]] =
+                                std::min(edge_records[c[i]][c[i+1]], nb.working_time);
                     }
-                    swap_remove_elem(elite_set, min_idx);
+
+                if (cfg.max_elite_size > 0) {
+                    if (elite_set.size() == cfg.max_elite_size) {
+                        // Remove least diverse
+                        size_t min_idx = 0;
+                        size_t min_hd  = elite_set[0].hamming_distance(result);
+                        for (size_t i = 1; i < elite_set.size(); ++i) {
+                            size_t hd = elite_set[i].hamming_distance(result);
+                            if (hd < min_hd) { min_hd = hd; min_idx = i; }
+                        }
+                        swap_remove_elem(elite_set, min_idx);
+                    }
+                    elite_set.push_back(nb);
                 }
-                elite_set.push_back(nb);
             }
 
             bool should_push = false;
@@ -866,8 +870,8 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                     break;
             }
 
-            if (should_push && hooks && hooks->push_elite) {
-                hooks->push_elite(iteration, result);
+            if (allow_push && should_push && hooks && hooks->push_elite) {
+                hooks->push_elite(result);
                 last_pushed_cost = result.cost();
             }
         }
@@ -967,7 +971,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
             if (cfg.elite_push_strategy == cli::ElitePushStrategy::SegmentBest
                 && hooks && hooks->push_elite
                 && result.cost() + TOLERANCE < last_pushed_cost) {
-                hooks->push_elite(iteration, result);
+                hooks->push_elite(result);
                 last_pushed_cost = result.cost();
             }
         }
@@ -983,16 +987,15 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                     + cfg.adaptive_pull_elite_segments;
 
             if (do_pull_elite) {
+                bool attempted = false;
                 bool pulled = false;
                 if (hooks && hooks->pull_elite) {
+                    attempted = true;
                     Solution pulled_elite;
                     pulled = hooks->pull_elite(iteration, pulled_elite);
                     if (pulled) {
-                        record_new(pulled_elite, iteration, adaptive.segment);
+                        record_new(pulled_elite, iteration, adaptive.segment, /*allow_push=*/false);
                         current = std::move(pulled_elite);
-                        for (auto& tl : tabu_lists) {
-                            tl.clear();
-                        }
                     }
                 }
 
@@ -1001,12 +1004,19 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                     break;
                 }
 
-                if (pulled) {
+                // Reset search state on every completed pull attempt, even if
+                // master had no elite to send -- only an actual Stop (handled
+                // by the break above) skips this.
+                if (attempted) {
+                    for (auto& tl : tabu_lists) {
+                        tl.clear();
+                    }
                     adaptive.segment_reset = adaptive.segment;
-                    adaptive.last_improved_seg = adaptive.segment;
                     adaptive.weights.assign(NUM_NEIGHBORHOODS, 1.0);
                     std::fill(adaptive.scores.begin(), adaptive.scores.end(), 0.0);
                     std::fill(adaptive.occurences.begin(), adaptive.occurences.end(), 0);
+                }
+                if (pulled) {
                     ++adaptive.pull_count;
                 }
             }
@@ -1117,7 +1127,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
     // strategy if it's better than the last elite we pushed, so the final
     // archive never misses it just because a threshold/segment never came.
     if (hooks && hooks->push_elite && result.cost() + TOLERANCE < last_pushed_cost) {
-        hooks->push_elite(last_improved, result);
+        hooks->push_elite(result);
         last_pushed_cost = result.cost();
     }
 

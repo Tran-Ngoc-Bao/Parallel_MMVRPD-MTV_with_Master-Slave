@@ -35,8 +35,7 @@ constexpr int TAG_ELITE_PUSH = 104;  // worker -> master: push elite
 constexpr int TAG_ELITE_PULL = 105;  // worker -> master: pull request
 constexpr int TAG_ELITE_REPLY = 106; // master -> worker: reply to pull request
 constexpr int TAG_STATS = 107;       // worker -> master: total evaluations and elite-push counts
-constexpr int TAG_EVAL_PROGRESS = 108; // worker -> master: running evaluations count (sent alongside elite pushes)
-constexpr double TOLERANCE = 0.001; // matches solutions.cpp; only for best_solution updates
+constexpr int TAG_EVAL_PROGRESS = 108; // worker -> master: running evaluations count, sent every 1/128 of its budget
 
 void send_string_impl(int dest, int tag, const std::string& payload)
 {
@@ -70,6 +69,13 @@ void send_job_start(int dest, std::size_t seed, int preset_index)
 void send_stop_signal(int dest, int tag)
 {
     int size = -1;
+    MPI_Send(&size, 1, MPI_INT, dest, tag, MPI_COMM_WORLD);
+}
+
+// No elite available to send, but the worker should keep running.
+void send_empty_signal(int dest, int tag)
+{
+    int size = -2;
     MPI_Send(&size, 1, MPI_INT, dest, tag, MPI_COMM_WORLD);
 }
 
@@ -154,21 +160,23 @@ static void randomize_worker_adaptive_hyperparams(Config& cfg)
     cfg.adaptive_pull_elite_segments = segment_dist(rng);
 }
 
-static bool recv_solution_or_stop(int source, int tag, Solution& solution)
+enum class PullReply { Solution, Empty, Stop };
+
+// Sentinels: size == -1 means Stop, size == -2 means Empty (see send_stop_signal/send_empty_signal).
+static PullReply recv_pull_reply(int source, int tag, Solution& solution)
 {
     MPI_Status status{};
     int size = 0;
     MPI_Recv(&size, 1, MPI_INT, source, tag, MPI_COMM_WORLD, &status);
-    if (size < 0) {
-        return false;
-    }
+    if (size == -1) return PullReply::Stop;
+    if (size == -2) return PullReply::Empty;
 
     std::string payload(static_cast<std::size_t>(size), '\0');
     if (size > 0) {
         MPI_Recv(payload.data(), size, MPI_CHAR, source, tag, MPI_COMM_WORLD, &status);
     }
     solution = Solution::from_json(nlohmann::json::parse(payload));
-    return true;
+    return PullReply::Solution;
 }
 
 struct JobStart { std::size_t seed; int preset_index; };
@@ -518,8 +526,7 @@ Solution run_master(int world_size)
     const auto t0 = std::chrono::steady_clock::now();
     const Config base_cfg = global_config();
     const cli::EliteReplaceStrategy elite_replace_strategy = base_cfg.elite_replace_strategy;
-    // Keep a valid fallback so verify() never receives an empty solution.
-    Solution best_solution = Solution::initialize();
+    std::optional<Solution> best_solution;
     const std::size_t elite_keep_count = compute_elite_pool_size(base_cfg, world_size);
     const std::size_t min_pull_elites_per_worker = compute_min_pull_elites_per_worker(base_cfg, world_size);
     ElitePool elite_pool(elite_keep_count);
@@ -534,7 +541,7 @@ Solution run_master(int world_size)
     std::size_t total_evaluations = 0;
     std::size_t total_push_count = 0;
     std::size_t accepted_push_count = 0;
-    std::mt19937 rng(static_cast<unsigned>(std::time(nullptr)));
+    std::mt19937 rng(base_cfg.seed ? static_cast<unsigned>(*base_cfg.seed) : 1u);
 
     const std::size_t evaluation_budget =
         base_cfg.max_evaluations * static_cast<std::size_t>(world_size - 1);
@@ -637,7 +644,7 @@ Solution run_master(int world_size)
             processed = true;
             const int worker_rank = status.MPI_SOURCE;
             Solution elite = recv_solution(worker_rank, TAG_ELITE_PUSH);
-            if (elite.cost() + TOLERANCE < best_solution.cost()) {
+            if (!best_solution || elite.cost() < best_solution->cost()) {
                 best_solution = elite;
                 record_new_best();
             }
@@ -679,8 +686,7 @@ Solution run_master(int world_size)
             if (stop_after_min_pulls) {
                 send_stop_signal(worker_rank, TAG_ELITE_REPLY);
             } else if (elite_pool.empty()) {
-                // No elite yet: send current best fallback instead of an empty solution.
-                send_solution(worker_rank, TAG_ELITE_REPLY, best_solution);
+                send_empty_signal(worker_rank, TAG_ELITE_REPLY);
             } else {
                 const Solution& elite_to_send = elite_pool.pick_for_dispatch(
                     worker_rank, rng, base_cfg.elite_pull_strategy);
@@ -697,7 +703,7 @@ Solution run_master(int world_size)
             processed = true;
             const int worker_rank = status.MPI_SOURCE;
             Solution result = recv_solution(worker_rank, TAG_RESULT);
-            bool result_is_new_best = result.cost() + TOLERANCE < best_solution.cost();
+            bool result_is_new_best = !best_solution || result.cost() < best_solution->cost();
             if (result_is_new_best) {
                 best_solution = result;
             }
@@ -738,13 +744,13 @@ Solution run_master(int world_size)
               << " total=" << total_sec << "\n";
 
     Logger logger;
-    logger.finalize(best_solution, 0, 0, 0, 0, 0, 0.0, 0.0,
+    logger.finalize(*best_solution, 0, 0, 0, 0, 0, 0.0, 0.0,
                      total_evaluations, total_push_count, accepted_push_count,
                      evaluation_budget,
                      evaluation_budget > 0 ? best_cost_by_checkpoint : std::vector<double>{},
                      elite_pool.size(), elite_pool.diversity(), elite_pool.costs(),
                      best_solution_evaluations);
-    return best_solution;
+    return *best_solution;
 }
 
 void run_worker(int /*rank*/)
@@ -765,7 +771,7 @@ void run_worker(int /*rank*/)
     std::size_t push_count = 0;
 
     Solution::EliteHooks hooks;
-    hooks.push_elite = [&](std::size_t, const Solution& elite) {
+    hooks.push_elite = [&](const Solution& elite) {
         send_solution_async(0, TAG_ELITE_PUSH, elite, pending_pushes);
         ++push_count;
     };
@@ -784,11 +790,12 @@ void run_worker(int /*rank*/)
             nlohmann::json j;
             j["iteration"] = iteration;
             send_string_impl(0, TAG_ELITE_PULL, j.dump());
-            if (!recv_solution_or_stop(0, TAG_ELITE_REPLY, pulled_elite)) {
-                stop_requested = true;
-                return false;
+            switch (recv_pull_reply(0, TAG_ELITE_REPLY, pulled_elite)) {
+                case PullReply::Solution: return true;
+                case PullReply::Stop:     stop_requested = true; return false;
+                case PullReply::Empty:    return false;
             }
-            return true;
+            return false;
         };
     }
 
