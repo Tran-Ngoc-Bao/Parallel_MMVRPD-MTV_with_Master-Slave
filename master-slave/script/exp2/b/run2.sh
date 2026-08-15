@@ -18,11 +18,11 @@ MAX_EVALUATIONS="${5:-0}"
 # Fixed settings for this experiment
 ADAPTIVE_ITERATIONS="60"
 ELITE_PULL_STRATEGY="off"
-ELITE_PUSH_STRATEGY="new-best"
+ELITE_PUSH_STRATEGY="significant-best"
 ELITE_REPLACE_STRATEGY="similarity-quality"
 
 # Compare 3 elite_pool_factor values, RUNS runs each
-POOL_FACTORS=("0.02" "0.06" "0.10")
+POOL_FACTORS=("0.02" "0.04" "0.06")
 
 DATA_DIR="${SCRIPT_DIR}/../../../../data"
 DATA_FILES=()

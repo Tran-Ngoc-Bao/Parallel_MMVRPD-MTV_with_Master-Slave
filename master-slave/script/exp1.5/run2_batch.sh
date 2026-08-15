@@ -3,8 +3,8 @@ set -euo pipefail
 export LC_NUMERIC=C
 
 JOBS=(
-    "200   194000000"
-    "500   2758000000"
+    # "200   194000000"
+    # "500   2758000000"
     "1000  13416000000"
 )
 
@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN2_SCRIPT="${SCRIPT_DIR}/run2.sh"
 
 RUNS="${1:-5}"
+SLEEP_SEC="${SLEEP_SEC:-0.0}"
 NUM_WORKERS="${2:-7}"
 
 N_LIST=()
@@ -27,7 +28,7 @@ for JOB in "${JOBS[@]}"; do
     echo "################################################################"
     echo "# n=${N}  max_evaluations=${MAX_EVALUATIONS}  [master-slave]   $(date '+%Y-%m-%d %H:%M:%S')"
     echo "################################################################"
-    bash "${RUN2_SCRIPT}" "${N}" "${RUNS}" "${NUM_WORKERS}" "${MAX_EVALUATIONS}"
+    bash "${RUN2_SCRIPT}" "${N}" "${RUNS}" "${SLEEP_SEC}" "${NUM_WORKERS}" "${MAX_EVALUATIONS}"
 done
 
 ELAPSED=$(( $(date +%s) - START_TS ))

@@ -34,7 +34,7 @@ import re
 import statistics
 from pathlib import Path
 
-POOL_FACTORS = ["0.02", "0.04", "0.06", "0.10"]
+POOL_FACTORS = ["0.02", "0.04", "0.06"]
 
 
 def load_run(path: Path):
@@ -126,7 +126,7 @@ def write_csv(path: Path, rows):
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--outputs", default="../../../outputs/exp2/b",
+    ap.add_argument("--outputs", default="../../../outputs/exp2/b-m",
                      help="Dir containing run2.sh output, relative to this script "
                           "(default: ../../../outputs/exp2/b)")
     ap.add_argument("--bks", default="../../../../bks",
