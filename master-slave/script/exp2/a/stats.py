@@ -19,10 +19,11 @@ infeasibility penalty at early checkpoints if the best-known solution
 isn't yet feasible at that point.
 
 Aggregation: for each (n, combo) instance, each strategy's numbers are
-averaged over its runs first (including reduction %, computed per
-instance against that instance's own new-best push rate); each
-strategy's final numbers are then the average over its instances (6 by
-default: 3 customer counts x 2 combos).
+averaged over its runs first; these per-instance numbers are then
+averaged over instances (6 by default: 3 customer counts x 2 combos) to
+get each strategy's final numbers. reduction % is the odd one out: it's
+computed once, from the final averaged push rates (not averaged from
+each instance's own detail reduction).
 
 Looks for run files at
 <outputs>/<n>/<n>.<combo>-<push_strategy>-<run_id>.json (the naming
@@ -163,7 +164,7 @@ def write_csv(path: Path, rows):
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--outputs", default="../../../outputs/exp2/a-m",
+    ap.add_argument("--outputs", default="../../../outputs/exp2/a",
                      help="Dir containing run2.sh output, relative to this script "
                           "(default: ../../../outputs/exp2/a)")
     ap.add_argument("--bks", default="../../../../bks",
@@ -228,7 +229,7 @@ def main():
     out(f"\n{'PushStrategy':<18}{'PushRate':>12}{'Reduct(%)':>11}{'Accept(%)':>11}"
         f"{'R2(%)':>10}{'R4(%)':>10}{'R8(%)':>10}{'irpd(%)':>10}")
     out("-" * 92)
-    strategy_rows = []
+    fields = {}
     for push_strategy in PUSH_STRATEGIES:
         rows = [r for r in summary_rows if r["push_strategy"] == push_strategy]
 
@@ -236,14 +237,23 @@ def main():
             vals = [r[f] for r in rows if r[f] is not None]
             return statistics.mean(vals) if vals else None
 
-        strategy_row = {
-            "push_strategy": push_strategy,
+        fields[push_strategy] = {
             "push_rate_per_million_evals": avg_field("push_rate_per_million_evals"),
-            "reduction_pct": avg_field("reduction_pct"),
             "accept_pct": avg_field("accept_pct"),
             "R2": avg_field("R2"), "R4": avg_field("R4"), "R8": avg_field("R8"),
             "irpd_pct": avg_field("irpd_pct"),
         }
+
+    # Reduction is derived from the final averaged push rates, not averaged
+    # from each instance's own detail reduction.
+    baseline_final_rate = fields["new-best"]["push_rate_per_million_evals"]
+    strategy_rows = []
+    for push_strategy in PUSH_STRATEGIES:
+        f = fields[push_strategy]
+        reduction = None
+        if f["push_rate_per_million_evals"] is not None and baseline_final_rate:
+            reduction = (baseline_final_rate - f["push_rate_per_million_evals"]) / baseline_final_rate * 100.0
+        strategy_row = {"push_strategy": push_strategy, "reduction_pct": reduction, **f}
         strategy_rows.append(strategy_row)
         out(f"{push_strategy:<18}{fmt(strategy_row['push_rate_per_million_evals'], 3):>12}"
             f"{fmt(strategy_row['reduction_pct'], 3):>11}"

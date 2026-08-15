@@ -19,7 +19,6 @@ MAX_EVALUATIONS="${5:-0}"
 ADAPTIVE_ITERATIONS="60"
 ELITE_PULL_STRATEGY="off"
 ELITE_REPLACE_STRATEGY="similarity-quality"
-ELITE_POOL_FACTOR="0.04"
 
 # Compare all 3 push strategies, RUNS runs each
 PUSH_STRATEGIES=("new-best" "segment-best" "significant-best")
@@ -38,7 +37,7 @@ if [ ${#DATA_FILES[@]} -eq 0 ]; then
     exit 1
 fi
 
-OUTPUT_DIR="${OUTPUTS_DIR:-${SCRIPT_DIR}/../../../outputs/exp2/a-m/${DATA_PREFIX}}"
+OUTPUT_DIR="${OUTPUTS_DIR:-${SCRIPT_DIR}/../../../outputs/exp2/a/${DATA_PREFIX}}"
 mkdir -p "${OUTPUT_DIR}"
 
 for DATA_FILE in "${DATA_FILES[@]}"; do

@@ -22,7 +22,7 @@ ELITE_PUSH_STRATEGY="significant-best"
 ELITE_REPLACE_STRATEGY="similarity-quality"
 
 # Compare 3 elite_pool_factor values, RUNS runs each
-POOL_FACTORS=("0.02" "0.04" "0.06")
+POOL_FACTORS=("0.02" "0.03" "0.04")
 
 DATA_DIR="${SCRIPT_DIR}/../../../../data"
 DATA_FILES=()
@@ -45,6 +45,12 @@ for DATA_FILE in "${DATA_FILES[@]}"; do
     DATA_FILE_NAME="$(basename "${DATA_FILE}" .txt)"
     for POOL_FACTOR in "${POOL_FACTORS[@]}"; do
         for ((x = 1; x <= RUNS; x++)); do
+            RUN_ID="pool${POOL_FACTOR}-${x}"
+            OUT_FILE="${OUTPUT_DIR}/${DATA_FILE_NAME}-${RUN_ID}.json"
+            if [ -f "${OUT_FILE}" ]; then
+                echo "=== ${DATA_FILE_NAME} pool=${POOL_FACTOR} run ${x}/${RUNS}: already have ${OUT_FILE}, skipping ==="
+                continue
+            fi
             SEED=$(( x * 100000 + 1001 ))
             echo "=== ${DATA_FILE_NAME} pool=${POOL_FACTOR} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
             NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
@@ -54,7 +60,7 @@ for DATA_FILE in "${DATA_FILES[@]}"; do
                 ELITE_POOL_FACTOR="${POOL_FACTOR}" \
                 ELITE_REPLACE_STRATEGY="${ELITE_REPLACE_STRATEGY}" \
                 OUTPUTS_DIR="${OUTPUT_DIR}" \
-                RUN_ID="pool${POOL_FACTOR}-${x}" \
+                RUN_ID="${RUN_ID}" \
                 bash "${RUN_SCRIPT}" "${DATA_FILE}"
             sleep "${SLEEP_SEC}"
         done
