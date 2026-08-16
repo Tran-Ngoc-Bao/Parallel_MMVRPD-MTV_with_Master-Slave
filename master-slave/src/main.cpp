@@ -79,6 +79,8 @@ int main(int argc, char** argv)
     run_cmd->add_option("--adaptive-iterations",       args.run.adaptive_iterations);
     run_cmd->add_flag  ("--adaptive-fixed-iterations", args.run.adaptive_fixed_iterations);
     run_cmd->add_option("--adaptive-pull-elite-segments", args.run.adaptive_pull_elite_segments);
+    run_cmd->add_option("--adaptive-segments",         args.run.adaptive_segments,
+        "Non-improving segments before a local do_reset, used only when --elite-pull-strategy=off");
     run_cmd->add_flag  ("--adaptive-fixed-segments",   args.run.adaptive_fixed_segments);
     run_cmd->add_option("--ejection-chain-iterations", args.run.ejection_chain_iterations);
     run_cmd->add_option("--destroy-rate",              args.run.destroy_rate);
@@ -87,15 +89,6 @@ int main(int argc, char** argv)
     run_cmd->add_option("--gamma-2",                   args.run.gamma_2);
     run_cmd->add_option("--gamma-3",                   args.run.gamma_3);
     run_cmd->add_option("--gamma-4",                   args.run.gamma_4);
-    run_cmd->add_option("--min-pull-elites-per-worker-factor", args.run.min_pull_elites_per_worker_factor);
-    std::map<std::string, cli::WorkerHyperparams> wh_map{
-        {"fixed",  cli::WorkerHyperparams::Fixed},
-        {"random", cli::WorkerHyperparams::Random},
-        {"preset", cli::WorkerHyperparams::Preset},
-    };
-    run_cmd->add_option("--worker-hyperparams", args.run.worker_hyperparams,
-                        "fixed|random|preset (default: fixed)")->transform(
-        CLI::CheckedTransformer(wh_map, CLI::ignore_case));
     run_cmd->add_flag  ("--randomize-worker-adaptive-hyperparams", args.run.randomize_worker_adaptive_hyperparams);
     run_cmd->add_flag  ("--compact-output",            args.run.compact_output);
     run_cmd->add_option("--run-id",                    args.run.run_id);
@@ -109,6 +102,13 @@ int main(int argc, char** argv)
     };
     run_cmd->add_option("--elite-pull-strategy", args.run.elite_pull_strategy)->transform(
         CLI::CheckedTransformer(elite_pull_map, CLI::ignore_case));
+
+    std::map<std::string, cli::ElitePullAcceptStrategy> elite_pull_accept_map{
+        {"always",    cli::ElitePullAcceptStrategy::Always},
+        {"selective", cli::ElitePullAcceptStrategy::Selective}
+    };
+    run_cmd->add_option("--elite-pull-accept-strategy", args.run.elite_pull_accept_strategy)->transform(
+        CLI::CheckedTransformer(elite_pull_accept_map, CLI::ignore_case));
 
     std::map<std::string, cli::ElitePushStrategy> elite_push_map{
         {"new-best",         cli::ElitePushStrategy::NewBest},
@@ -163,13 +163,10 @@ int main(int argc, char** argv)
 
     run_cmd->add_option("--reset-after-factor",  args.run.reset_after_factor);
     run_cmd->add_option("--max-elite-size",       args.run.max_elite_size);
-    run_cmd->add_option("--time-limit",           args.run.time_limit,
-        "If non-zero, stop after this many seconds instead of after a number "
-        "of non-improving segments");
     run_cmd->add_option("--max-evaluations",      args.run.max_evaluations,
         "If non-zero, stop after this many total neighborhood evaluations "
         "(per worker). Stop-condition priority: max-evaluations, then "
-        "time-limit, then non-improving segments");
+        "non-improving segments");
     run_cmd->add_option("--penalty-exponent",     args.run.penalty_exponent);
     run_cmd->add_flag  ("--single-truck-route",   args.run.single_truck_route);
     run_cmd->add_flag  ("--single-drone-route",   args.run.single_drone_route);

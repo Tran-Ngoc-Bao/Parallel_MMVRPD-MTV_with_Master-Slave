@@ -11,8 +11,8 @@ enum class Strategy    { Random, Cyclic, Vns, Adaptive };
 enum class ElitePullStrategy { Random, TopK, Rank, PullCount, Off };
 enum class ElitePushStrategy { NewBest, SegmentBest, SignificantBest };
 enum class EliteReplaceStrategy { SimilarityOnly, SimilarityQuality, SimilarityPullFirst };
+enum class ElitePullAcceptStrategy { Always, Selective };
 enum class DistanceType{ Manhattan, Euclidean };
-enum class WorkerHyperparams { Fixed, Random, Preset };
 
 inline const char* to_str(EnergyModel m){
     switch(m){
@@ -64,15 +64,9 @@ inline const char* to_str(EliteReplaceStrategy s){
 inline const char* to_str(DistanceType d){
     return d == DistanceType::Manhattan ? "manhattan" : "euclidean";
 }
-inline const char* to_str(WorkerHyperparams w){
-    switch(w){
-        case WorkerHyperparams::Fixed:  return "fixed";
-        case WorkerHyperparams::Random: return "random";
-        case WorkerHyperparams::Preset: return "preset";
-    }
-    return "fixed";
+inline const char* to_str(ElitePullAcceptStrategy s){
+    return s == ElitePullAcceptStrategy::Selective ? "selective" : "always";
 }
-
 // ---------------------------------------------------------------------
 // Run sub-command options
 // ---------------------------------------------------------------------
@@ -85,11 +79,13 @@ struct RunArgs {
     std::size_t   adaptive_iterations        = 60;
     bool          adaptive_fixed_iterations  = false;
     std::size_t   adaptive_pull_elite_segments = 1;
+    std::size_t   adaptive_segments          = 7;
     bool          adaptive_fixed_segments    = false;
     std::size_t   ejection_chain_iterations  = 0;
     double        destroy_rate               = 0.1;
     double        elite_pool_factor          = 0.06;
     ElitePullStrategy elite_pull_strategy    = ElitePullStrategy::Random;
+    ElitePullAcceptStrategy elite_pull_accept_strategy = ElitePullAcceptStrategy::Always;
     ElitePushStrategy elite_push_strategy    = ElitePushStrategy::NewBest;
     ConfigType    speed_type                 = ConfigType::High;
     ConfigType    range_type                 = ConfigType::High;
@@ -102,7 +98,6 @@ struct RunArgs {
     std::optional<std::size_t> fix_iteration = std::nullopt;
     double        reset_after_factor         = 125.0;
     std::size_t   max_elite_size             = 0;
-    double        time_limit                 = 0.0;
     std::size_t   max_evaluations            = 0;
     double        penalty_exponent           = 0.5;
     bool          single_truck_route         = false;
@@ -117,8 +112,6 @@ struct RunArgs {
     double        gamma_2                    = 0.2;
     double        gamma_3                    = 0.1;
     double        gamma_4                    = 0.3;
-    double        min_pull_elites_per_worker_factor = 1.0;
-    WorkerHyperparams worker_hyperparams     = WorkerHyperparams::Fixed;
     bool          randomize_worker_adaptive_hyperparams = false;
     EliteReplaceStrategy elite_replace_strategy = EliteReplaceStrategy::SimilarityOnly;
     bool          compact_output             = false;

@@ -13,10 +13,9 @@ PROBLEM_FILE="${1:-${SCRIPT_DIR}/../../data/${DEFAULT_DATA_PREFIX}.10.2.txt}"
 ADAPTIVE_ITERATIONS="${ADAPTIVE_ITERATIONS:-10}"
 ADAPTIVE_PULL_ELITE_SEGMENTS="${ADAPTIVE_PULL_ELITE_SEGMENTS:-4}"
 ELITE_PULL_STRATEGY="${ELITE_PULL_STRATEGY:-topk}"
-ELITE_PUSH_STRATEGY="${ELITE_PUSH_STRATEGY:-new-best}"
-MIN_PULL_ELITES_PER_WORKER_FACTOR="${MIN_PULL_ELITES_PER_WORKER_FACTOR:-1.0}"
-ELITE_POOL_FACTOR="${ELITE_POOL_FACTOR:-0.06}"
-WORKER_HYPERPARAMS="${WORKER_HYPERPARAMS:-fixed}"
+ELITE_PULL_ACCEPT_STRATEGY="${ELITE_PULL_ACCEPT_STRATEGY:-always}"
+ELITE_PUSH_STRATEGY="${ELITE_PUSH_STRATEGY:-significant-best}"
+ELITE_POOL_FACTOR="${ELITE_POOL_FACTOR:-0.03}"
 ELITE_REPLACE_STRATEGY="${ELITE_REPLACE_STRATEGY:-similarity-pull-first}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 OUTPUTS_DIR="${OUTPUTS_DIR:-outputs}"
@@ -32,16 +31,12 @@ CMD=(
   --adaptive-iterations "${ADAPTIVE_ITERATIONS}"
   --adaptive-pull-elite-segments "${ADAPTIVE_PULL_ELITE_SEGMENTS}"
   --elite-pull-strategy "${ELITE_PULL_STRATEGY}"
+  --elite-pull-accept-strategy "${ELITE_PULL_ACCEPT_STRATEGY}"
   --elite-push-strategy "${ELITE_PUSH_STRATEGY}"
-  --min-pull-elites-per-worker-factor "${MIN_PULL_ELITES_PER_WORKER_FACTOR}"
   --elite-pool-factor "${ELITE_POOL_FACTOR}"
   --elite-replace-strategy "${ELITE_REPLACE_STRATEGY}"
   --outputs "${OUTPUTS_DIR}"
 )
-
-if [ "${WORKER_HYPERPARAMS}" != "fixed" ]; then
-  CMD+=(--worker-hyperparams "${WORKER_HYPERPARAMS}")
-fi
 
 if [ "${COMPACT_OUTPUT}" = "1" ]; then
   CMD+=(--compact-output)

@@ -17,12 +17,13 @@ MAX_EVALUATIONS="${5:-0}"
 
 # Fixed settings for this experiment
 ADAPTIVE_ITERATIONS="60"
-ELITE_PUSH_STRATEGY="new-best"
+ELITE_PUSH_STRATEGY="significant-best"
+ELITE_POOL_FACTOR="0.03"
 ELITE_REPLACE_STRATEGY="similarity-quality"
-ELITE_POOL_FACTOR="0.04"
 
-# Compare the 4 non-off pull strategies, RUNS runs each
+# Compare 4 elite-pull strategies (excluding off) x 2 elite-pull-accept strategies, RUNS runs each
 PULL_STRATEGIES=("random" "topk" "rank" "pullcount")
+ACCEPT_STRATEGIES=("always" "selective")
 
 DATA_DIR="${SCRIPT_DIR}/../../../../data"
 DATA_FILES=()
@@ -44,19 +45,28 @@ mkdir -p "${OUTPUT_DIR}"
 for DATA_FILE in "${DATA_FILES[@]}"; do
     DATA_FILE_NAME="$(basename "${DATA_FILE}" .txt)"
     for PULL_STRATEGY in "${PULL_STRATEGIES[@]}"; do
-        for ((x = 1; x <= RUNS; x++)); do
-            SEED=$(( x * 100000 + 1001 ))
-            echo "=== ${DATA_FILE_NAME} pull=${PULL_STRATEGY} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
-            NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
-                ADAPTIVE_ITERATIONS="${ADAPTIVE_ITERATIONS}" \
-                ELITE_PULL_STRATEGY="${PULL_STRATEGY}" \
-                ELITE_PUSH_STRATEGY="${ELITE_PUSH_STRATEGY}" \
-                ELITE_POOL_FACTOR="${ELITE_POOL_FACTOR}" \
-                ELITE_REPLACE_STRATEGY="${ELITE_REPLACE_STRATEGY}" \
-                OUTPUTS_DIR="${OUTPUT_DIR}" \
-                RUN_ID="pull${PULL_STRATEGY}-${x}" \
-                bash "${RUN_SCRIPT}" "${DATA_FILE}"
-            sleep "${SLEEP_SEC}"
+        for ACCEPT_STRATEGY in "${ACCEPT_STRATEGIES[@]}"; do
+            for ((x = 1; x <= RUNS; x++)); do
+                RUN_ID="${PULL_STRATEGY}-${ACCEPT_STRATEGY}-${x}"
+                OUT_FILE="${OUTPUT_DIR}/${DATA_FILE_NAME}-${RUN_ID}.json"
+                if [ -f "${OUT_FILE}" ]; then
+                    echo "=== ${DATA_FILE_NAME} pull=${PULL_STRATEGY} accept=${ACCEPT_STRATEGY} run ${x}/${RUNS}: already have ${OUT_FILE}, skipping ==="
+                    continue
+                fi
+                SEED=$(( x * 100 ))
+                echo "=== ${DATA_FILE_NAME} pull=${PULL_STRATEGY} accept=${ACCEPT_STRATEGY} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
+                NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
+                    ADAPTIVE_ITERATIONS="${ADAPTIVE_ITERATIONS}" \
+                    ELITE_PULL_STRATEGY="${PULL_STRATEGY}" \
+                    ELITE_PULL_ACCEPT_STRATEGY="${ACCEPT_STRATEGY}" \
+                    ELITE_PUSH_STRATEGY="${ELITE_PUSH_STRATEGY}" \
+                    ELITE_POOL_FACTOR="${ELITE_POOL_FACTOR}" \
+                    ELITE_REPLACE_STRATEGY="${ELITE_REPLACE_STRATEGY}" \
+                    OUTPUTS_DIR="${OUTPUT_DIR}" \
+                    RUN_ID="${RUN_ID}" \
+                    bash "${RUN_SCRIPT}" "${DATA_FILE}"
+                sleep "${SLEEP_SEC}"
+            done
         done
     done
 done

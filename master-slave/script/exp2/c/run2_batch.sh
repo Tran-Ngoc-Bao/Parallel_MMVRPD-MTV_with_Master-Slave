@@ -10,7 +10,7 @@ JOBS=(
 
 # Usage:
 #   bash run2_batch.sh [RUNS] [NUM_WORKERS]
-# Compares the 4 non-off pull strategies per customer size, RUNS runs each (see run2.sh)
+# Compares 4 elite-pull strategies x 2 elite-pull-accept strategies per customer size, RUNS runs each (see run2.sh)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN2_SCRIPT="${SCRIPT_DIR}/run2.sh"

@@ -288,6 +288,7 @@ Config build_config(const cli::RunArgs& args)
     cfg.adaptive_iterations       = args.adaptive_iterations;
     cfg.adaptive_fixed_iterations = args.adaptive_fixed_iterations;
     cfg.adaptive_pull_elite_segments = args.adaptive_pull_elite_segments;
+    cfg.adaptive_segments         = args.adaptive_segments;
     cfg.adaptive_fixed_segments   = args.adaptive_fixed_segments;
     cfg.ejection_chain_iterations = args.ejection_chain_iterations;
     cfg.destroy_rate              = args.destroy_rate;
@@ -297,11 +298,11 @@ Config build_config(const cli::RunArgs& args)
     cfg.waiting_time_limit        = args.waiting_time_limit;
     cfg.strategy                  = args.strategy;
     cfg.elite_pull_strategy       = args.elite_pull_strategy;
+    cfg.elite_pull_accept_strategy = args.elite_pull_accept_strategy;
     cfg.elite_push_strategy       = args.elite_push_strategy;
     cfg.fix_iteration             = args.fix_iteration;
     cfg.reset_after_factor        = args.reset_after_factor;
     cfg.max_elite_size            = args.max_elite_size;
-    cfg.time_limit                = args.time_limit;
     cfg.max_evaluations           = args.max_evaluations;
     cfg.penalty_exponent          = args.penalty_exponent;
     cfg.single_truck_route        = args.single_truck_route;
@@ -316,8 +317,6 @@ Config build_config(const cli::RunArgs& args)
     cfg.gamma_2                   = args.gamma_2;
     cfg.gamma_3                   = args.gamma_3;
     cfg.gamma_4                   = args.gamma_4;
-    cfg.min_pull_elites_per_worker_factor = args.min_pull_elites_per_worker_factor;
-    cfg.worker_hyperparams        = args.worker_hyperparams;
     cfg.randomize_worker_adaptive_hyperparams = args.randomize_worker_adaptive_hyperparams;
     cfg.elite_replace_strategy    = args.elite_replace_strategy;
     cfg.compact_output            = args.compact_output;
@@ -358,6 +357,9 @@ static std::string elite_pull_strategy_str(cli::ElitePullStrategy s) {
         case cli::ElitePullStrategy::Off:       return "off";
     }
     return "";
+}
+static std::string elite_pull_accept_strategy_str(cli::ElitePullAcceptStrategy s) {
+    return s == cli::ElitePullAcceptStrategy::Selective ? "selective" : "always";
 }
 static std::string elite_push_strategy_str(cli::ElitePushStrategy s) {
     switch(s) {
@@ -461,6 +463,7 @@ nlohmann::json config_to_json(const Config& cfg) {
     j["adaptive_iterations"]       = cfg.adaptive_iterations;
     j["adaptive_fixed_iterations"] = cfg.adaptive_fixed_iterations;
     j["adaptive_pull_elite_segments"] = cfg.adaptive_pull_elite_segments;
+    j["adaptive_segments"]         = cfg.adaptive_segments;
     j["adaptive_fixed_segments"]   = cfg.adaptive_fixed_segments;
     j["ejection_chain_iterations"] = cfg.ejection_chain_iterations;
     j["destroy_rate"]              = cfg.destroy_rate;
@@ -470,6 +473,7 @@ nlohmann::json config_to_json(const Config& cfg) {
     j["waiting_time_limit"]        = cfg.waiting_time_limit;
     j["strategy"]                  = strategy_str(cfg.strategy);
     j["elite_pull_strategy"]       = elite_pull_strategy_str(cfg.elite_pull_strategy);
+    j["elite_pull_accept_strategy"] = elite_pull_accept_strategy_str(cfg.elite_pull_accept_strategy);
     j["elite_push_strategy"]       = elite_push_strategy_str(cfg.elite_push_strategy);
     if (cfg.fix_iteration)
         j["fix_iteration"]         = *cfg.fix_iteration;
@@ -477,7 +481,6 @@ nlohmann::json config_to_json(const Config& cfg) {
         j["fix_iteration"]         = nullptr;
     j["reset_after_factor"]        = cfg.reset_after_factor;
     j["max_elite_size"]            = cfg.max_elite_size;
-    j["time_limit"]                = cfg.time_limit;
     j["max_evaluations"]           = cfg.max_evaluations;
     j["penalty_exponent"]          = cfg.penalty_exponent;
     j["single_truck_route"]        = cfg.single_truck_route;
@@ -491,8 +494,6 @@ nlohmann::json config_to_json(const Config& cfg) {
     j["gamma_2"]                   = cfg.gamma_2;
     j["gamma_3"]                   = cfg.gamma_3;
     j["gamma_4"]                   = cfg.gamma_4;
-    j["min_pull_elites_per_worker_factor"] = cfg.min_pull_elites_per_worker_factor;
-    j["worker_hyperparams"]        = cli::to_str(cfg.worker_hyperparams);
     j["randomize_worker_adaptive_hyperparams"] = cfg.randomize_worker_adaptive_hyperparams;
     j["elite_replace_strategy"]    = elite_replace_strategy_str(cfg.elite_replace_strategy);
     j["compact_output"]            = cfg.compact_output;
@@ -617,6 +618,10 @@ Config build_config_from_json(const std::string& json_path)
         if (s == "off")      return cli::ElitePullStrategy::Off;
         return cli::ElitePullStrategy::Random;
     };
+    auto elite_pull_accept_from_str = [](const std::string& s) {
+        if (s == "selective") return cli::ElitePullAcceptStrategy::Selective;
+        return cli::ElitePullAcceptStrategy::Always;
+    };
     auto elite_push_from_str = [](const std::string& s) {
         if (s == "segment-best")     return cli::ElitePushStrategy::SegmentBest;
         if (s == "significant-best") return cli::ElitePushStrategy::SignificantBest;
@@ -634,6 +639,7 @@ Config build_config_from_json(const std::string& json_path)
     cfg.adaptive_iterations       = j.at("adaptive_iterations").get<std::size_t>();
     cfg.adaptive_fixed_iterations = j.at("adaptive_fixed_iterations").get<bool>();
     cfg.adaptive_pull_elite_segments = j.at("adaptive_pull_elite_segments").get<std::size_t>();
+    cfg.adaptive_segments         = j.value("adaptive_segments", static_cast<std::size_t>(7));
     cfg.adaptive_fixed_segments   = j.at("adaptive_fixed_segments").get<bool>();
     cfg.ejection_chain_iterations = j.at("ejection_chain_iterations").get<std::size_t>();
     cfg.destroy_rate              = j.at("destroy_rate").get<double>();
@@ -645,6 +651,9 @@ Config build_config_from_json(const std::string& json_path)
     cfg.elite_pull_strategy       = j.contains("elite_pull_strategy")
         ? elite_pull_from_str(j.at("elite_pull_strategy").get<std::string>())
         : cli::ElitePullStrategy::Random;
+    cfg.elite_pull_accept_strategy = j.contains("elite_pull_accept_strategy")
+        ? elite_pull_accept_from_str(j.at("elite_pull_accept_strategy").get<std::string>())
+        : cli::ElitePullAcceptStrategy::Always;
     cfg.elite_push_strategy       = j.contains("elite_push_strategy")
         ? elite_push_from_str(j.at("elite_push_strategy").get<std::string>())
         : cli::ElitePushStrategy::NewBest;
@@ -652,7 +661,6 @@ Config build_config_from_json(const std::string& json_path)
         cfg.fix_iteration         = j.at("fix_iteration").get<std::size_t>();
     cfg.reset_after_factor        = j.at("reset_after_factor").get<double>();
     cfg.max_elite_size            = j.at("max_elite_size").get<std::size_t>();
-    cfg.time_limit                = j.value("time_limit", 0.0);
     cfg.max_evaluations           = j.value("max_evaluations", static_cast<std::size_t>(0));
     cfg.penalty_exponent          = j.at("penalty_exponent").get<double>();
     cfg.single_truck_route        = j.at("single_truck_route").get<bool>();
@@ -666,13 +674,6 @@ Config build_config_from_json(const std::string& json_path)
     cfg.gamma_2                   = j.at("gamma_2").get<double>();
     cfg.gamma_3                   = j.at("gamma_3").get<double>();
     cfg.gamma_4                   = j.at("gamma_4").get<double>();
-    cfg.min_pull_elites_per_worker_factor = j.at("min_pull_elites_per_worker_factor").get<double>();
-    {
-        auto s = j.value("worker_hyperparams", std::string("fixed"));
-        if (s == "random")      cfg.worker_hyperparams = cli::WorkerHyperparams::Random;
-        else if (s == "preset") cfg.worker_hyperparams = cli::WorkerHyperparams::Preset;
-        else                    cfg.worker_hyperparams = cli::WorkerHyperparams::Fixed;
-    }
     cfg.randomize_worker_adaptive_hyperparams = j.at("randomize_worker_adaptive_hyperparams").get<bool>();
     if (j.contains("elite_replace_strategy")) {
         cfg.elite_replace_strategy = elite_replace_from_str(j.at("elite_replace_strategy").get<std::string>());

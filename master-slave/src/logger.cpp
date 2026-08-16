@@ -168,7 +168,8 @@ void Logger::finalize(const Solution& result,
                       std::size_t elite_pool_size,
                       double elite_pool_diversity,
                       const std::vector<double>& elite_pool_costs,
-                      std::size_t best_solution_evaluations)
+                      const std::vector<std::size_t>& worker_search_seeds,
+                      const std::vector<std::size_t>& worker_coop_seeds)
 {
     this->total_evaluations = total_evaluations;
 
@@ -205,10 +206,16 @@ void Logger::finalize(const Solution& result,
     run["elite_pool_size"]                     = elite_pool_size;
     run["elite_pool_diversity"]                = elite_pool_diversity;
     run["elite_pool_costs"]                    = elite_pool_costs;
-    run["best_solution_evaluations"]           = best_solution_evaluations;
-    run["best_solution_evaluations_percent"]   = evaluation_checkpoint_budget > 0
-        ? 100.0 * static_cast<double>(best_solution_evaluations) / static_cast<double>(evaluation_checkpoint_budget)
-        : 0.0;
+
+    nlohmann::json worker_seeds_json = nlohmann::json::array();
+    for (std::size_t i = 0; i < worker_search_seeds.size(); ++i) {
+        nlohmann::json w;
+        w["worker"]      = i + 1;
+        w["search_seed"] = worker_search_seeds[i];
+        w["coop_seed"]   = worker_coop_seeds[i];
+        worker_seeds_json.push_back(w);
+    }
+    run["worker_seeds"]                        = worker_seeds_json;
 
     fs::path out(_outputs);
 

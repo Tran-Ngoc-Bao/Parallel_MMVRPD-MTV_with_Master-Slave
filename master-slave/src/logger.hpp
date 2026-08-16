@@ -41,5 +41,6 @@ struct Logger {
                   std::size_t elite_pool_size = 0,
                   double elite_pool_diversity = 0.0,
                   const std::vector<double>& elite_pool_costs = {},
-                  std::size_t best_solution_evaluations = 0);
+                  const std::vector<std::size_t>& worker_search_seeds = {},
+                  const std::vector<std::size_t>& worker_coop_seeds = {});
 };

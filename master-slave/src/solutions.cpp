@@ -773,7 +773,6 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
         size_t segment             = 0;
         size_t segment_reset       = 0;
         size_t last_improved_seg   = 0;
-        size_t pull_count          = 0;
         std::vector<double> scores;
         std::vector<double> weights;
         std::vector<uint32_t> occurences;
@@ -828,9 +827,10 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
             last_improved = iteration;
             adaptive.last_improved_seg = segment;
 
-            // edge_records/elite_set only feed destroy_and_repair, which never
-            // runs under Adaptive -- skip updating them in that case.
-            if (cfg.strategy != cli::Strategy::Adaptive) {
+            // edge_records/elite_set only feed destroy_and_repair, which under
+            // Adaptive only runs when elite pull is off (local do_reset fallback).
+            if (cfg.strategy != cli::Strategy::Adaptive
+                || cfg.elite_pull_strategy == cli::ElitePullStrategy::Off) {
                 for (const auto& routes : nb.truck_routes)
                     for (const auto& r : routes) {
                         const auto& c = r->data().customers;
@@ -887,29 +887,24 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
         ? *cfg.fix_iteration
         : std::numeric_limits<size_t>::max() / 2;
 
-    auto search_start = std::chrono::steady_clock::now();
-
     for (size_t iteration = 1; iteration <= max_iter; ++iteration) {
-        // Stop-condition priority: max-evaluations, then time-limit, then
-        // non-improving segments (checked further below via elite_set /
-        // hooks->should_stop).
+        // Stop-condition priority: max-evaluations, then non-improving
+        // segments (checked further below via elite_set).
         if (cfg.max_evaluations > 0 && total_evals >= cfg.max_evaluations) break;
-
-        if (cfg.time_limit > 0.0) {
-            double elapsed = std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - search_start).count();
-            if (elapsed >= cfg.time_limit) break;
-        }
 
         if (cfg.verbose) {
             auto segments_before_reset = [&]() -> size_t {
+                const std::size_t threshold =
+                    cfg.elite_pull_strategy == cli::ElitePullStrategy::Off
+                        ? cfg.adaptive_segments
+                        : cfg.adaptive_pull_elite_segments;
                 if (cfg.adaptive_fixed_segments)
-                    return adaptive.segment > adaptive.segment_reset + cfg.adaptive_pull_elite_segments
-                        ? adaptive.segment - (adaptive.segment_reset + cfg.adaptive_pull_elite_segments)
+                    return adaptive.segment > adaptive.segment_reset + threshold
+                        ? adaptive.segment - (adaptive.segment_reset + threshold)
                         : 0;
-                return cfg.adaptive_pull_elite_segments >
+                return threshold >
                     (adaptive.segment - std::max(adaptive.segment_reset, adaptive.last_improved_seg))
-                    ? cfg.adaptive_pull_elite_segments -
+                    ? threshold -
                       (adaptive.segment - std::max(adaptive.segment_reset, adaptive.last_improved_seg))
                     : 0;
             };
@@ -978,46 +973,55 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
 
         // Check reset / elite pull condition
         if (cfg.strategy == cli::Strategy::Adaptive) {
+            const std::size_t segments_threshold =
+                cfg.elite_pull_strategy == cli::ElitePullStrategy::Off
+                    ? cfg.adaptive_segments
+                    : cfg.adaptive_pull_elite_segments;
+
             bool do_pull_elite = false;
             if (cfg.adaptive_fixed_segments)
-                do_pull_elite = adaptive.segment >= adaptive.segment_reset + cfg.adaptive_pull_elite_segments;
+                do_pull_elite = adaptive.segment >= adaptive.segment_reset + segments_threshold;
             else
                 do_pull_elite = adaptive.segment >=
                     std::max(adaptive.segment_reset, adaptive.last_improved_seg)
-                    + cfg.adaptive_pull_elite_segments;
+                    + segments_threshold;
 
             if (do_pull_elite) {
                 bool attempted = false;
-                bool pulled = false;
-                if (hooks && hooks->pull_elite) {
+                if (cfg.elite_pull_strategy == cli::ElitePullStrategy::Off) {
+                    // Local do_reset fallback (mirrors the non-Adaptive branch
+                    // below), repeating every adaptive_segments stagnant
+                    // segments until this worker exhausts its evaluation budget.
                     attempted = true;
-                    Solution pulled_elite;
-                    pulled = hooks->pull_elite(iteration, pulled_elite);
-                    if (pulled) {
-                        record_new(pulled_elite, iteration, adaptive.segment, /*allow_push=*/false);
-                        current = std::move(pulled_elite);
+                    adaptive.weights.assign(NUM_NEIGHBORHOODS, 1.0);
+
+                    if (elite_set.empty()) {
+                        if (cfg.max_evaluations > 0) elite_set.push_back(result);
+                        else break;
                     }
-                }
 
-                if (cfg.max_evaluations == 0 &&
-                    hooks && hooks->should_stop && hooks->should_stop()) {
-                    break;
-                }
-
-                // Reset search state on every completed pull attempt, even if
-                // master had no elite to send -- only an actual Stop (handled
-                // by the break above) skips this.
-                if (attempted) {
+                    std::uniform_int_distribution<size_t> pick(0, elite_set.size() - 1);
+                    size_t i = pick(rng);
+                    Solution picked = swap_remove_elem(elite_set, i);
+                    current = picked.destroy_and_repair(edge_records);
                     for (auto& tl : tabu_lists) {
                         tl.clear();
                     }
-                    adaptive.segment_reset = adaptive.segment;
-                    adaptive.weights.assign(NUM_NEIGHBORHOODS, 1.0);
-                    std::fill(adaptive.scores.begin(), adaptive.scores.end(), 0.0);
-                    std::fill(adaptive.occurences.begin(), adaptive.occurences.end(), 0);
+                } else if (hooks && hooks->pull_elite) {
+                    attempted = true;
+                    Solution pulled_elite;
+                    bool pulled = hooks->pull_elite(iteration, current, pulled_elite);
+                    if (pulled) {
+                        record_new(pulled_elite, iteration, adaptive.segment, /*allow_push=*/false);
+                        current = std::move(pulled_elite);
+                        for (auto& tl : tabu_lists) {
+                            tl.clear();
+                        }
+                    }
                 }
-                if (pulled) {
-                    ++adaptive.pull_count;
+
+                if (attempted) {
+                    adaptive.segment_reset = adaptive.segment;
                 }
             }
 
@@ -1051,7 +1055,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                 adaptive.weights.assign(NUM_NEIGHBORHOODS, 1.0);
 
                 if (elite_set.empty()) {
-                    if (cfg.max_evaluations > 0 || cfg.time_limit > 0.0) elite_set.push_back(result);
+                    if (cfg.max_evaluations > 0) elite_set.push_back(result);
                     else break;
                 }
 
