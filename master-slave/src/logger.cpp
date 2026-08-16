@@ -169,7 +169,9 @@ void Logger::finalize(const Solution& result,
                       double elite_pool_diversity,
                       const std::vector<double>& elite_pool_costs,
                       const std::vector<std::size_t>& worker_search_seeds,
-                      const std::vector<std::size_t>& worker_coop_seeds)
+                      const std::vector<std::size_t>& worker_coop_seeds,
+                      std::size_t pull_offer_count,
+                      std::size_t pull_accept_count)
 {
     this->total_evaluations = total_evaluations;
 
@@ -206,6 +208,8 @@ void Logger::finalize(const Solution& result,
     run["elite_pool_size"]                     = elite_pool_size;
     run["elite_pool_diversity"]                = elite_pool_diversity;
     run["elite_pool_costs"]                    = elite_pool_costs;
+    run["pull_offer_count"]                    = pull_offer_count;
+    run["pull_accept_count"]                   = pull_accept_count;
 
     nlohmann::json worker_seeds_json = nlohmann::json::array();
     for (std::size_t i = 0; i < worker_search_seeds.size(); ++i) {

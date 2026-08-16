@@ -700,7 +700,8 @@ Solution run_master(int world_size)
                      evaluation_budget,
                      evaluation_budget > 0 ? best_cost_by_checkpoint : std::vector<double>{},
                      elite_pool.size(), elite_pool.diversity(), elite_pool.costs(),
-                     worker_search_seeds, worker_coop_seeds);
+                     worker_search_seeds, worker_coop_seeds,
+                     pull_offer_count, pull_accept_count);
     return *best_solution;
 }
 
