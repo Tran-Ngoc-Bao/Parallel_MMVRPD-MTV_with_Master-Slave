@@ -44,7 +44,13 @@ for DATA_FILE in "${DATA_FILES[@]}"; do
     DATA_FILE_NAME="$(basename "${DATA_FILE}" .txt)"
     for PUSH_STRATEGY in "${PUSH_STRATEGIES[@]}"; do
         for ((x = 1; x <= RUNS; x++)); do
-            SEED=$(( x * 100000 + 1001 ))
+            RUN_ID="${PUSH_STRATEGY}-${x}"
+            OUT_FILE="${OUTPUT_DIR}/${DATA_FILE_NAME}-${RUN_ID}.json"
+            if [ -f "${OUT_FILE}" ]; then
+                echo "=== ${DATA_FILE_NAME} push=${PUSH_STRATEGY} run ${x}/${RUNS}: already have ${OUT_FILE}, skipping ==="
+                continue
+            fi
+            SEED=$(( x * 1000 ))
             echo "=== ${DATA_FILE_NAME} push=${PUSH_STRATEGY} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
             NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
                 ADAPTIVE_ITERATIONS="${ADAPTIVE_ITERATIONS}" \
@@ -52,7 +58,7 @@ for DATA_FILE in "${DATA_FILES[@]}"; do
                 ELITE_PUSH_STRATEGY="${PUSH_STRATEGY}" \
                 ELITE_REPLACE_STRATEGY="${ELITE_REPLACE_STRATEGY}" \
                 OUTPUTS_DIR="${OUTPUT_DIR}" \
-                RUN_ID="${PUSH_STRATEGY}-${x}" \
+                RUN_ID="${RUN_ID}" \
                 bash "${RUN_SCRIPT}" "${DATA_FILE}"
             sleep "${SLEEP_SEC}"
         done

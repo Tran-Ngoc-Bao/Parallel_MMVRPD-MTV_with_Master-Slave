@@ -171,7 +171,9 @@ void Logger::finalize(const Solution& result,
                       const std::vector<std::size_t>& worker_search_seeds,
                       const std::vector<std::size_t>& worker_coop_seeds,
                       std::size_t pull_offer_count,
-                      std::size_t pull_accept_count)
+                      std::size_t pull_accept_count,
+                      std::size_t pull_request_count,
+                      const std::vector<std::size_t>& worker_pull_request_counts)
 {
     this->total_evaluations = total_evaluations;
 
@@ -210,6 +212,10 @@ void Logger::finalize(const Solution& result,
     run["elite_pool_costs"]                    = elite_pool_costs;
     run["pull_offer_count"]                    = pull_offer_count;
     run["pull_accept_count"]                   = pull_accept_count;
+    run["pull_request_count"]                  = pull_request_count;
+    run["pull_request_rate_per_million_evals"] = total_evaluations > 0
+        ? static_cast<double>(pull_request_count) / static_cast<double>(total_evaluations) * 1e6
+        : 0.0;
 
     nlohmann::json worker_seeds_json = nlohmann::json::array();
     for (std::size_t i = 0; i < worker_search_seeds.size(); ++i) {
@@ -220,6 +226,15 @@ void Logger::finalize(const Solution& result,
         worker_seeds_json.push_back(w);
     }
     run["worker_seeds"]                        = worker_seeds_json;
+
+    nlohmann::json worker_pull_stats_json = nlohmann::json::array();
+    for (std::size_t i = 0; i < worker_pull_request_counts.size(); ++i) {
+        nlohmann::json w;
+        w["worker"]         = i + 1;
+        w["request_count"]  = worker_pull_request_counts[i];
+        worker_pull_stats_json.push_back(w);
+    }
+    run["worker_pull_stats"]                   = worker_pull_stats_json;
 
     fs::path out(_outputs);
 

@@ -93,35 +93,38 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
     for push_strategy in PUSH_STRATEGIES:
         run_files = find_run_files(outputs_dir, n, instance, push_strategy)
 
-        pushes, accepted_pushes, evals, checkpoints_per_run = [], [], [], []
+        push_rates, accept_pcts, r_per_run = [], [], []
         for run_id, path in run_files:
             data = load_run(path)
             p = data["total_elite_pushes"]
             a = data["accepted_elite_pushes"]
             e = data["total_evaluations"]
             cps = data["best_cost_by_evaluation_checkpoint"]
-            pushes.append(p)
-            accepted_pushes.append(a)
-            evals.append(e)
+
+            run_push_rate = p / e * 1e6 if e else None
+            run_accept_pct = a / p * 100.0 if p else None
+            push_rates.append(run_push_rate)
+            accept_pcts.append(run_accept_pct)
             if len(cps) == NUM_CHECKPOINTS:
-                checkpoints_per_run.append(cps)
+                r_per_run.append([rpd_pct(v, bks_value) for v in cps])
+
             detail_rows.append({
                 "n": n, "instance": instance, "push_strategy": push_strategy, "run": run_id,
                 "total_elite_pushes": p, "accepted_elite_pushes": a, "total_evaluations": e,
-                "push_rate_per_million_evals": p / e * 1e6 if e else None,
-                "accept_pct": a / p * 100.0 if p else None,
+                "push_rate_per_million_evals": run_push_rate,
+                "accept_pct": run_accept_pct,
             })
 
-        avg_pushes = statistics.mean(pushes) if pushes else None
-        avg_accepted = statistics.mean(accepted_pushes) if accepted_pushes else None
-        avg_evals = statistics.mean(evals) if evals else None
-        push_rate = (avg_pushes / avg_evals * 1e6) if avg_pushes is not None and avg_evals else None
-        accept_pct = (avg_accepted / avg_pushes * 100.0) if avg_accepted is not None and avg_pushes else None
+        def mean_or_none(vals):
+            vals = [v for v in vals if v is not None]
+            return statistics.mean(vals) if vals else None
+
+        push_rate = mean_or_none(push_rates)
+        accept_pct = mean_or_none(accept_pcts)
 
         r = [None] * NUM_CHECKPOINTS
-        if checkpoints_per_run:
-            avg_checkpoints = [statistics.mean(vals) for vals in zip(*checkpoints_per_run)]
-            r = [rpd_pct(v, bks_value) for v in avg_checkpoints]
+        if r_per_run:
+            r = [mean_or_none(vals) for vals in zip(*r_per_run)]
 
         per_strategy[push_strategy] = {
             "runs": len(run_files), "push_rate": push_rate, "accept_pct": accept_pct,

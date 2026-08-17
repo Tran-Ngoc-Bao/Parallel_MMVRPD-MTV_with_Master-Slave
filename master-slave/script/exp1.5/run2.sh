@@ -35,7 +35,7 @@ mkdir -p "${OUTPUT_DIR}"
 for DATA_FILE in "${DATA_FILES[@]}"; do
     DATA_FILE_NAME="$(basename "${DATA_FILE}" .txt)"
     for ((x = 1; x <= RUNS; x++)); do
-        SEED=$(( x * 100000 + 1001 ))
+        SEED=$(( x * 100000 + 1000 ))
         echo "=== ${DATA_FILE_NAME} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
         NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
             OUTPUTS_DIR="${OUTPUT_DIR}" \

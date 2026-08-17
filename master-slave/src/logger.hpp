@@ -44,5 +44,7 @@ struct Logger {
                   const std::vector<std::size_t>& worker_search_seeds = {},
                   const std::vector<std::size_t>& worker_coop_seeds = {},
                   std::size_t pull_offer_count = 0,
-                  std::size_t pull_accept_count = 0);
+                  std::size_t pull_accept_count = 0,
+                  std::size_t pull_request_count = 0,
+                  const std::vector<std::size_t>& worker_pull_request_counts = {});
 };

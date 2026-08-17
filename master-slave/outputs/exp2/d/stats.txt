@@ -1,0 +1,19 @@
+outputs: /home/bao/Documents/github/Parallel_MMVRPD-MTV_with_Master-Slave/master-slave/outputs/exp2/d
+bks:     /home/bao/Documents/github/Parallel_MMVRPD-MTV_with_Master-Slave/bks
+
+Segments    avg_RPD(%)  Request/1M evals
+----------------------------------------
+2               -0.226             0.102
+4               -0.759             0.046
+8               -0.672             0.019
+
+Note: fewer runs found than expected for: 500.10.2/seg2 (0/3), 500.10.2/seg4 (0/3), 500.10.2/seg8 (0/3), 500.40.1/seg2 (0/3), 500.40.1/seg4 (0/3), 500.40.1/seg8 (0/3), 1000.10.2/seg2 (0/3), 1000.10.2/seg4 (0/3), 1000.10.2/seg8 (0/3), 1000.40.1/seg2 (0/3), 1000.40.1/seg4 (0/3), 1000.40.1/seg8 (0/3)
+
+Worker             seg=2         seg=4         seg=8
+----------------------------------------------------
+1                 20.000         9.167         3.833
+2                 19.667         8.833         3.667
+3                 20.333         9.500         3.667
+4                 19.000         7.833         3.333
+5                 19.333         8.833         3.833
+6                 20.667         9.167         3.333

@@ -78,34 +78,39 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
     for pool_factor in POOL_FACTORS:
         run_files = find_run_files(outputs_dir, n, instance, pool_factor)
 
-        pool_sizes, pool_diversities, pool_mean_costs = [], [], []
+        pool_sizes, pool_diversities, pool_rpds = [], [], []
         for run_id, path in run_files:
             data = load_run(path)
             pool_size = data["elite_pool_size"]
             pool_diversity = data["elite_pool_diversity"]
             pool_costs = data["elite_pool_costs"]
             pool_mean_cost = statistics.mean(pool_costs) if pool_costs else None
+            pool_rpd = rpd_pct(pool_mean_cost, bks_value)
 
             pool_sizes.append(pool_size)
             pool_diversities.append(pool_diversity)
-            if pool_mean_cost is not None:
-                pool_mean_costs.append(pool_mean_cost)
+            if pool_rpd is not None:
+                pool_rpds.append(pool_rpd)
 
             detail_rows.append({
                 "n": n, "instance": instance, "pool_factor": pool_factor, "run": run_id,
                 "elite_pool_size": pool_size, "elite_pool_diversity": pool_diversity,
-                "elite_pool_rpd_pct": rpd_pct(pool_mean_cost, bks_value),
+                "elite_pool_rpd_pct": pool_rpd,
             })
 
-        avg_pool_size = statistics.mean(pool_sizes) if pool_sizes else None
-        avg_pool_diversity = statistics.mean(pool_diversities) if pool_diversities else None
-        avg_pool_mean_cost = statistics.mean(pool_mean_costs) if pool_mean_costs else None
+        def mean_or_none(vals):
+            vals = [v for v in vals if v is not None]
+            return statistics.mean(vals) if vals else None
+
+        avg_pool_size = mean_or_none(pool_sizes)
+        avg_pool_diversity = mean_or_none(pool_diversities)
+        avg_pool_rpd = mean_or_none(pool_rpds)
 
         summary_rows.append({
             "n": n, "instance": instance, "pool_factor": pool_factor,
             "bks": bks_value, "runs": len(run_files), "expected_runs": expected_runs,
             "elite_pool_size": avg_pool_size,
-            "elite_pool_rpd_pct": rpd_pct(avg_pool_mean_cost, bks_value),
+            "elite_pool_rpd_pct": avg_pool_rpd,
             "elite_pool_diversity": avg_pool_diversity,
         })
     return summary_rows, detail_rows

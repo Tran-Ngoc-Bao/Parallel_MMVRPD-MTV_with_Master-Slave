@@ -519,8 +519,12 @@ Solution run_master(int world_size)
     std::size_t total_evaluations = 0;
     std::size_t total_push_count = 0;
     std::size_t accepted_push_count = 0;
+    std::size_t pull_request_count = 0;
     std::size_t pull_offer_count = 0;
     std::size_t pull_accept_count = 0;
+    // Per-worker request counts only -- offer/accept are tracked globally
+    // above (that's the granularity exp2/c and exp2/d actually need).
+    std::vector<std::size_t> worker_pull_request_counts_by_rank(static_cast<std::size_t>(world_size), 0);
 
     const std::size_t evaluation_budget =
         base_cfg.max_evaluations * static_cast<std::size_t>(world_size - 1);
@@ -624,6 +628,9 @@ Solution run_master(int world_size)
                 requester_current = Solution::from_json(pull_req.at("current"));
             }
 
+            ++pull_request_count;
+            ++worker_pull_request_counts_by_rank[static_cast<std::size_t>(worker_rank)];
+
             const Solution* elite_to_send = nullptr;
             if (!elite_pool.empty()) {
                 auto it = worker_pull_rngs.try_emplace(
@@ -692,7 +699,14 @@ Solution run_master(int world_size)
               << init_sec << " search=" << loop_sec
               << " total=" << total_sec << "\n";
 
-    std::cerr << "Pull accept count: " << pull_accept_count << "/" << pull_offer_count << "\n";
+    std::cerr << "Pull accept count: " << pull_accept_count << "/" << pull_offer_count
+              << " (requests: " << pull_request_count << ")\n";
+
+    std::vector<std::size_t> worker_pull_request_counts(static_cast<std::size_t>(world_size - 1), 0);
+    for (int worker_rank = 1; worker_rank < world_size; ++worker_rank) {
+        worker_pull_request_counts[static_cast<std::size_t>(worker_rank - 1)] =
+            worker_pull_request_counts_by_rank[static_cast<std::size_t>(worker_rank)];
+    }
 
     Logger logger;
     logger.finalize(*best_solution, 0, 0, 0, 0, 0, 0.0, 0.0,
@@ -701,7 +715,8 @@ Solution run_master(int world_size)
                      evaluation_budget > 0 ? best_cost_by_checkpoint : std::vector<double>{},
                      elite_pool.size(), elite_pool.diversity(), elite_pool.costs(),
                      worker_search_seeds, worker_coop_seeds,
-                     pull_offer_count, pull_accept_count);
+                     pull_offer_count, pull_accept_count,
+                     pull_request_count, worker_pull_request_counts);
     return *best_solution;
 }
 
