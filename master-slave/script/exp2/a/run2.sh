@@ -50,7 +50,7 @@ for DATA_FILE in "${DATA_FILES[@]}"; do
                 echo "=== ${DATA_FILE_NAME} push=${PUSH_STRATEGY} run ${x}/${RUNS}: already have ${OUT_FILE}, skipping ==="
                 continue
             fi
-            SEED=$(( x * 1000 ))
+            SEED=$(( x * 100 ))
             echo "=== ${DATA_FILE_NAME} push=${PUSH_STRATEGY} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
             NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
                 ADAPTIVE_ITERATIONS="${ADAPTIVE_ITERATIONS}" \

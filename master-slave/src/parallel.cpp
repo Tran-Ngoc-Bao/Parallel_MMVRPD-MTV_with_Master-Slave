@@ -190,60 +190,6 @@ void recv_stats(int source, std::size_t& total_evaluations, std::size_t& push_co
     push_count        = j.at("push_count").get<std::size_t>();
 }
 
-static std::size_t
-count_diff_elite(const Solution& a, const Solution& b)
-{
-    auto pack_edge = [](std::size_t u, std::size_t v) -> uint64_t {
-        if (u > v) std::swap(u, v);
-        return (static_cast<uint64_t>(u) << 32) | static_cast<uint64_t>(v);
-    };
-
-    std::unordered_map<uint64_t, std::size_t> ea, eb;
-    auto collect_edge_counts = [&](const Solution& sol, std::unordered_map<uint64_t, std::size_t>& out) {
-        out.clear();
-        for (const auto& truck_vehicle : sol.truck_routes) {
-            for (const auto& route : truck_vehicle) {
-                const auto& customers = route->data().customers;
-                if (customers.size() < 2) continue;
-                for (std::size_t i = 0; i < customers.size(); ++i) {
-                    std::size_t u = customers[i];
-                    std::size_t v = customers[(i + 1) % customers.size()];
-                    out[pack_edge(u, v)] += 1;
-                }
-            }
-        }
-        for (const auto& drone_vehicle : sol.drone_routes) {
-            for (const auto& route : drone_vehicle) {
-                const auto& customers = route->data().customers;
-                if (customers.size() < 2) continue;
-                for (std::size_t i = 0; i < customers.size(); ++i) {
-                    std::size_t u = customers[i];
-                    std::size_t v = customers[(i + 1) % customers.size()];
-                    out[pack_edge(u, v)] += 1;
-                }
-            }
-        }
-    };
-
-    collect_edge_counts(a, ea);
-    collect_edge_counts(b, eb);
-
-    std::size_t edge_loss_raw = 0;
-    for (const auto& p : ea) {
-        const std::size_t ca = p.second;
-        std::size_t cb = 0;
-        const auto itb = eb.find(p.first);
-        if (itb != eb.end()) {
-            cb = itb->second;
-        }
-        if (ca > cb) {
-            edge_loss_raw += (ca - cb);
-        }
-    }
-
-    return edge_loss_raw;
-}
-
 // offered: true iff at least one elite from a worker other than the
 // requester exists in the pool. solution: non-null iff that elite was
 // actually sent (offered && accepted).
@@ -268,7 +214,7 @@ struct ElitePool {
 
             for (std::size_t i = 0; i < solutions.size(); ++i) {
                 if (!eligible(i)) continue;
-                double diff = static_cast<double>(count_diff_elite(candidate, solutions[i].sol));
+                double diff = candidate.td_distance(solutions[i].sol);
                 if (!best || diff < best_diff || (diff == best_diff && prefer(i, *best))) {
                     best_diff = diff;
                     best = i;
@@ -341,33 +287,31 @@ struct ElitePool {
         return result;
     }
 
-    // Average pairwise Hamming distance across all elites currently in the
-    // pool: div = 2/(m*(m-1)) * sum over all C(m,2) pairs.
-    // Normalized to [0,1] by customers_count
+    // Average pairwise structural (td) distance across all elites currently
+    // in the pool: div = 2/(m*(m-1)) * sum over all C(m,2) pairs. td_distance
+    // is already normalized to [0,1], so no extra scaling is needed here.
     double diversity() const
     {
         const std::size_t m = solutions.size();
         if (m < 2) return 0.0;
-        const std::size_t customers_count = global_config().customers_count;
-        if (customers_count == 0) return 0.0;
 
-        std::size_t sum = 0;
+        double sum = 0.0;
         for (std::size_t i = 0; i < m; ++i) {
             for (std::size_t j = i + 1; j < m; ++j) {
-                sum += solutions[i].sol.hamming_distance(solutions[j].sol);
+                sum += solutions[i].sol.td_distance(solutions[j].sol);
             }
         }
-        return 2.0 * static_cast<double>(sum)
-             / (static_cast<double>(m) * static_cast<double>(m - 1) * static_cast<double>(customers_count));
+        return 2.0 * sum
+             / (static_cast<double>(m) * static_cast<double>(m - 1));
     }
 
     // offered = false if no elite in the pool originates from a worker other
     // than excluded_worker. Otherwise offered = true, and solution is
     // non-null unless (accept_strategy is Selective and) the picked elite
-    // fails the accept check against requester_current.
+    // fails the accept check against the requester's own personal best.
     PickResult pick_for_dispatch(int excluded_worker, std::mt19937& rng, cli::ElitePullStrategy strategy,
                                   cli::ElitePullAcceptStrategy accept_strategy,
-                                  const Solution* requester_current)
+                                  const Solution* requester_personal_best)
     {
         std::vector<std::size_t> candidates;
         for (std::size_t i = 0; i < solutions.size(); ++i) {
@@ -449,21 +393,21 @@ struct ElitePool {
         // Selective: pull_count above is incremented regardless of the
         // accept/reject outcome below.
         const double cost_e = picked->cost();
-        const double cost_current = requester_current->cost();
-        if (cost_e < cost_current) {
+        const double cost_personal_best = requester_personal_best->cost();
+        if (cost_e < cost_personal_best) {
             return {true, picked};
         }
-        if (cost_e <= 1.01 * cost_current) {
+        if (cost_e <= 1.01 * cost_personal_best) {
             std::vector<double> d_values;
             d_values.reserve(candidates.size());
             for (std::size_t idx : candidates) {
-                const double d = static_cast<double>(solutions[idx].sol.hamming_distance(*requester_current));
+                const double d = solutions[idx].sol.td_distance(*requester_personal_best);
                 if (d > 0.0) d_values.push_back(d);
             }
             if (!d_values.empty()) {
                 const double mean_d = std::accumulate(d_values.begin(), d_values.end(), 0.0)
                                      / static_cast<double>(d_values.size());
-                const double d_e = static_cast<double>(picked->hamming_distance(*requester_current));
+                const double d_e = picked->td_distance(*requester_personal_best);
                 if (d_e > mean_d) {
                     return {true, picked};
                 }
@@ -623,9 +567,9 @@ Solution run_master(int world_size)
             const int worker_rank = status.MPI_SOURCE;
             nlohmann::json pull_req = nlohmann::json::parse(recv_string_impl(worker_rank, TAG_ELITE_PULL));
             const std::size_t worker_coop_seed = pull_req.value("seed", std::size_t{0});
-            std::optional<Solution> requester_current;
-            if (pull_req.contains("current")) {
-                requester_current = Solution::from_json(pull_req.at("current"));
+            std::optional<Solution> requester_personal_best;
+            if (pull_req.contains("personal_best")) {
+                requester_personal_best = Solution::from_json(pull_req.at("personal_best"));
             }
 
             ++pull_request_count;
@@ -638,7 +582,7 @@ Solution run_master(int world_size)
                 PickResult pick = elite_pool.pick_for_dispatch(
                     worker_rank, it->second, base_cfg.elite_pull_strategy,
                     base_cfg.elite_pull_accept_strategy,
-                    requester_current ? &*requester_current : nullptr);
+                    requester_personal_best ? &*requester_personal_best : nullptr);
                 if (pick.offered) ++pull_offer_count;
                 if (pick.solution) ++pull_accept_count;
                 elite_to_send = pick.solution;
@@ -748,12 +692,12 @@ void run_worker(int /*rank*/)
     };
 
     if (worker_cfg.elite_pull_strategy != cli::ElitePullStrategy::Off) {
-        hooks.pull_elite = [&](std::size_t iteration, const Solution& current, Solution& pulled_elite) -> bool {
+        hooks.pull_elite = [&](std::size_t iteration, const Solution& personal_best, Solution& pulled_elite) -> bool {
             nlohmann::json j;
             j["iteration"] = iteration;
             j["seed"]      = coop_seed;
             if (worker_cfg.elite_pull_accept_strategy == cli::ElitePullAcceptStrategy::Selective) {
-                j["current"] = current.to_json();
+                j["personal_best"] = personal_best.to_json();
             }
             send_string_impl(0, TAG_ELITE_PULL, j.dump());
             switch (recv_pull_reply(0, TAG_ELITE_REPLY, pulled_elite)) {

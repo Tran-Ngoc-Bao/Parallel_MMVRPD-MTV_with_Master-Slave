@@ -49,7 +49,7 @@ struct Solution {
 
     struct EliteHooks {
         std::function<void(const Solution& elite)> push_elite;
-        std::function<bool(std::size_t iteration, const Solution& current, Solution& pulled_elite)> pull_elite;
+        std::function<bool(std::size_t iteration, const Solution& personal_best, Solution& pulled_elite)> pull_elite;
         std::function<void(std::size_t total_evaluations)> report_progress;
     };
 
@@ -66,6 +66,18 @@ struct Solution {
     double cost() const;
 
     size_t hamming_distance(const Solution& other) const;
+
+    // Structural distance in [0,1] combining mode-assignment, physical-vehicle
+    // grouping, trip-partition, and visit-sequence differences (see
+    // "distance 2 solution.pdf" / "pseudocode distance 2 solutions.pdf").
+    double td_distance(const Solution& other) const;
+
+    // Asymmetric edge-multiset loss: counts, per undirected consecutive-
+    // customer edge (including each route's closing edge), how much this
+    // solution's occurrence count exceeds `other`'s, summed over edges
+    // where this solution has an excess. Used by the elite pool to find
+    // the existing entry most similar to a candidate for replacement.
+    size_t edge_distance(const Solution& other) const;
 
     void verify() const;
 

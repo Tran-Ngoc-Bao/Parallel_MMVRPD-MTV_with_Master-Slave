@@ -9,10 +9,10 @@ BUILD_DIR="${PROJECT_DIR}/build"
 #   ./build.sh          -- normal release build
 #   ./build.sh pgo      -- two-pass PGO build (instrument → profile → optimized)
 #   ./build.sh pgo FILE -- PGO using FILE as the profiling workload
-#                          (default: ../../../data/200.40.4.txt)
+#                          (default: ../../../data/200.10.2.txt)
 
 MODE="${1:-}"
-PROFILE_PROBLEM="${2:-${PROJECT_DIR}/../../data/200.40.4.txt}"
+PROFILE_PROBLEM="${2:-${PROJECT_DIR}/../../data/200.10.2.txt}"
 
 case "${PROFILE_PROBLEM}" in
   /*) ;;

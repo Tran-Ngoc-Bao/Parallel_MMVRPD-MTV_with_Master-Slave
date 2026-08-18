@@ -24,7 +24,7 @@ ELITE_POOL_FACTOR="0.03"
 ELITE_REPLACE_STRATEGY="similarity-quality"
 
 # Compare 3 adaptive_pull_elite_segments values, RUNS runs each
-SEGMENTS_LIST=("2" "4" "6" "8")
+SEGMENTS_LIST=("2" "4" "8")
 
 DATA_DIR="${SCRIPT_DIR}/../../../../data"
 DATA_FILES=()

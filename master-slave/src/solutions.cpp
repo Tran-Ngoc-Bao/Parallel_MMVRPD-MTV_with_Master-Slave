@@ -7,11 +7,13 @@
 #include <queue>
 #include <random>
 #include <unordered_set>
+#include <unordered_map>
 #include <chrono>
 #include <numeric>
 #include <iostream>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <array>
 
 // -----------------------------------------------------------------------
@@ -250,6 +252,177 @@ size_t Solution::hamming_distance(const Solution& other) const {
     size_t count = 0;
     for (size_t i = 0; i <= cfg.customers_count; ++i) if (a[i] != b[i]) ++count;
     return count;
+}
+
+// -----------------------------------------------------------------------
+// td_distance
+// -----------------------------------------------------------------------
+namespace {
+
+enum class TdMode : uint8_t { Truck, Drone };
+
+struct TdExtracted {
+    std::vector<TdMode>     mode;    // [1..n]
+    std::vector<size_t>     vehicle; // [1..n], unique physical-vehicle id within this solution
+    std::vector<size_t>     trip;    // [1..n], unique depot-to-depot trip id within this solution
+    std::unordered_set<uint64_t> arcs; // directed (i,j): j served right after i in the same trip
+};
+
+uint64_t td_pack(size_t a, size_t b) {
+    return (static_cast<uint64_t>(a) << 32) | static_cast<uint64_t>(b);
+}
+
+size_t td_choose2(size_t r) { return r * (r - 1) / 2; }
+
+double td_relation_distance(double count1, double count2, double common) {
+    if (count1 + count2 == 0.0) return 0.0;
+    return std::clamp(1.0 - (2.0 * common) / (count1 + count2), 0.0, 1.0);
+}
+
+TdExtracted td_extract(const Solution& s, size_t n) {
+    TdExtracted e;
+    e.mode.assign(n + 1, TdMode::Truck);
+    e.vehicle.assign(n + 1, 0);
+    e.trip.assign(n + 1, 0);
+
+    size_t vehicle_id = 0;
+    size_t trip_id     = 0;
+
+    auto visit_vehicle = [&](const auto& vehicle_routes, TdMode mode) {
+        ++vehicle_id;
+        for (const auto& route : vehicle_routes) {
+            ++trip_id;
+            const auto& c = route->data().customers;
+            for (size_t p = 1; p + 1 < c.size(); ++p) {
+                const size_t cust = c[p];
+                e.mode[cust]    = mode;
+                e.vehicle[cust] = vehicle_id;
+                e.trip[cust]    = trip_id;
+            }
+            for (size_t p = 1; p + 2 < c.size(); ++p) {
+                e.arcs.insert(td_pack(c[p], c[p+1]));
+            }
+        }
+    };
+
+    for (const auto& vehicle_routes : s.truck_routes) visit_vehicle(vehicle_routes, TdMode::Truck);
+    for (const auto& vehicle_routes : s.drone_routes) visit_vehicle(vehicle_routes, TdMode::Drone);
+
+    return e;
+}
+
+} // namespace
+
+double Solution::td_distance(const Solution& other) const {
+    const size_t n = global_config().customers_count;
+    if (n == 0) return 0.0;
+
+    const TdExtracted e1 = td_extract(*this,  n);
+    const TdExtracted e2 = td_extract(other, n);
+
+    size_t changed_mode = 0;
+    std::unordered_map<size_t, size_t>   vehicle_size1, vehicle_size2;
+    std::unordered_map<uint64_t, size_t> vehicle_overlap;
+    std::unordered_map<size_t, size_t>   trip_size1, trip_size2;
+    std::unordered_map<uint64_t, size_t> trip_overlap;
+
+    for (size_t i = 1; i <= n; ++i) {
+        if (e1.mode[i] != e2.mode[i]) ++changed_mode;
+
+        ++vehicle_size1[e1.vehicle[i]];
+        ++vehicle_size2[e2.vehicle[i]];
+        ++vehicle_overlap[td_pack(e1.vehicle[i], e2.vehicle[i])];
+
+        ++trip_size1[e1.trip[i]];
+        ++trip_size2[e2.trip[i]];
+        ++trip_overlap[td_pack(e1.trip[i], e2.trip[i])];
+    }
+
+    auto sum_choose2 = [](const auto& counts) {
+        size_t total = 0;
+        for (const auto& kv : counts) total += td_choose2(kv.second);
+        return total;
+    };
+
+    const double dM = static_cast<double>(changed_mode) / static_cast<double>(n);
+
+    const double dV = td_relation_distance(
+        static_cast<double>(sum_choose2(vehicle_size1)),
+        static_cast<double>(sum_choose2(vehicle_size2)),
+        static_cast<double>(sum_choose2(vehicle_overlap)));
+
+    const double dP = td_relation_distance(
+        static_cast<double>(sum_choose2(trip_size1)),
+        static_cast<double>(sum_choose2(trip_size2)),
+        static_cast<double>(sum_choose2(trip_overlap)));
+
+    const auto& smaller_arcs = e1.arcs.size() <= e2.arcs.size() ? e1.arcs : e2.arcs;
+    const auto& larger_arcs  = e1.arcs.size() <= e2.arcs.size() ? e2.arcs : e1.arcs;
+    size_t common_arcs = 0;
+    for (uint64_t a : smaller_arcs) if (larger_arcs.count(a)) ++common_arcs;
+
+    const double dR = td_relation_distance(
+        static_cast<double>(e1.arcs.size()),
+        static_cast<double>(e2.arcs.size()),
+        static_cast<double>(common_arcs));
+
+    const double dTD = (1.0/6.0) * dM + (1.0/6.0) * dV + (1.0/3.0) * dP + (1.0/3.0) * dR;
+    return std::clamp(dTD, 0.0, 1.0);
+}
+
+// -----------------------------------------------------------------------
+// edge_distance
+// -----------------------------------------------------------------------
+size_t Solution::edge_distance(const Solution& other) const {
+    auto pack_edge = [](std::size_t u, std::size_t v) -> uint64_t {
+        if (u > v) std::swap(u, v);
+        return (static_cast<uint64_t>(u) << 32) | static_cast<uint64_t>(v);
+    };
+
+    std::unordered_map<uint64_t, std::size_t> ea, eb;
+    auto collect_edge_counts = [&](const Solution& sol, std::unordered_map<uint64_t, std::size_t>& out) {
+        out.clear();
+        for (const auto& truck_vehicle : sol.truck_routes) {
+            for (const auto& route : truck_vehicle) {
+                const auto& customers = route->data().customers;
+                if (customers.size() < 2) continue;
+                for (std::size_t i = 0; i < customers.size(); ++i) {
+                    std::size_t u = customers[i];
+                    std::size_t v = customers[(i + 1) % customers.size()];
+                    out[pack_edge(u, v)] += 1;
+                }
+            }
+        }
+        for (const auto& drone_vehicle : sol.drone_routes) {
+            for (const auto& route : drone_vehicle) {
+                const auto& customers = route->data().customers;
+                if (customers.size() < 2) continue;
+                for (std::size_t i = 0; i < customers.size(); ++i) {
+                    std::size_t u = customers[i];
+                    std::size_t v = customers[(i + 1) % customers.size()];
+                    out[pack_edge(u, v)] += 1;
+                }
+            }
+        }
+    };
+
+    collect_edge_counts(*this, ea);
+    collect_edge_counts(other, eb);
+
+    std::size_t edge_loss_raw = 0;
+    for (const auto& p : ea) {
+        const std::size_t ca = p.second;
+        std::size_t cb = 0;
+        const auto itb = eb.find(p.first);
+        if (itb != eb.end()) {
+            cb = itb->second;
+        }
+        if (ca > cb) {
+            edge_loss_raw += (ca - cb);
+        }
+    }
+
+    return edge_loss_raw;
 }
 
 // -----------------------------------------------------------------------
@@ -843,9 +1016,9 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                     if (elite_set.size() == cfg.max_elite_size) {
                         // Remove least diverse
                         size_t min_idx = 0;
-                        size_t min_hd  = elite_set[0].hamming_distance(result);
+                        double min_hd  = elite_set[0].td_distance(result);
                         for (size_t i = 1; i < elite_set.size(); ++i) {
-                            size_t hd = elite_set[i].hamming_distance(result);
+                            double hd = elite_set[i].td_distance(result);
                             if (hd < min_hd) { min_hd = hd; min_idx = i; }
                         }
                         swap_remove_elem(elite_set, min_idx);
@@ -1010,7 +1183,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                 } else if (hooks && hooks->pull_elite) {
                     attempted = true;
                     Solution pulled_elite;
-                    bool pulled = hooks->pull_elite(iteration, current, pulled_elite);
+                    bool pulled = hooks->pull_elite(iteration, result, pulled_elite);
                     if (pulled) {
                         record_new(pulled_elite, iteration, adaptive.segment, /*allow_push=*/false);
                         current = std::move(pulled_elite);

@@ -40,7 +40,7 @@ import re
 import statistics
 from pathlib import Path
 
-SEGMENTS_LIST = ["2", "4", "6", "8"]
+SEGMENTS_LIST = ["2", "4", "8"]
 
 
 def load_run(path: Path):
@@ -151,8 +151,8 @@ def main():
     ap.add_argument("--bks", default="../../../../bks",
                      help="Dir containing BKS json files, relative to this script "
                           "(default: ../../../../bks)")
-    ap.add_argument("--customers", default="200,500,1000",
-                     help="Comma-separated customer counts (default: 200,500,1000)")
+    ap.add_argument("--customers", default="200,500",
+                     help="Comma-separated customer counts (default: 200,500)")
     ap.add_argument("--combos", default="10.2,40.1",
                      help="Comma-separated instance combos, matches run2.sh "
                           "(default: 10.2,40.1)")

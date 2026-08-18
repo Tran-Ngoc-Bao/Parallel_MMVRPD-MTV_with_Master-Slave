@@ -83,7 +83,7 @@ struct RunArgs {
     bool          adaptive_fixed_segments    = false;
     std::size_t   ejection_chain_iterations  = 0;
     double        destroy_rate               = 0.1;
-    double        elite_pool_factor          = 0.06;
+    double        elite_pool_factor          = 0.03;
     ElitePullStrategy elite_pull_strategy    = ElitePullStrategy::Random;
     ElitePullAcceptStrategy elite_pull_accept_strategy = ElitePullAcceptStrategy::Always;
     ElitePushStrategy elite_push_strategy    = ElitePushStrategy::NewBest;

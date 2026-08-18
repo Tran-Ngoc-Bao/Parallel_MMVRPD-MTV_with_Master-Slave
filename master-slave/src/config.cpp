@@ -643,7 +643,7 @@ Config build_config_from_json(const std::string& json_path)
     cfg.adaptive_fixed_segments   = j.at("adaptive_fixed_segments").get<bool>();
     cfg.ejection_chain_iterations = j.at("ejection_chain_iterations").get<std::size_t>();
     cfg.destroy_rate              = j.at("destroy_rate").get<double>();
-    cfg.elite_pool_factor         = j.value("elite_pool_factor", 1.5);
+    cfg.elite_pool_factor         = j.value("elite_pool_factor", 0.03);
     cfg.speed_type                = st_from_str(j.at("speed_type").get<std::string>());
     cfg.range_type                = st_from_str(j.at("range_type").get<std::string>());
     cfg.waiting_time_limit        = j.at("waiting_time_limit").get<double>();

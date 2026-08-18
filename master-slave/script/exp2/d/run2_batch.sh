@@ -9,12 +9,12 @@ JOBS=(
 
 # Usage:
 #   bash run2_batch.sh [RUNS] [NUM_WORKERS]
-# Compares 4 adaptive_pull_elite_segments values per customer size, RUNS runs each (see run2.sh)
+# Compares 3 adaptive_pull_elite_segments values per customer size, RUNS runs each (see run2.sh)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN2_SCRIPT="${SCRIPT_DIR}/run2.sh"
 
-RUNS="${1:-3}"
+RUNS="${1:-5}"
 SLEEP_SEC="${SLEEP_SEC:-0.0}"
 NUM_WORKERS="${2:-7}"
 
