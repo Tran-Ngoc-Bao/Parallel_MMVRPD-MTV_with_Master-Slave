@@ -5,12 +5,11 @@ export LC_NUMERIC=C
 JOBS=(
     "200   194000000"
     "500   2758000000"
-    "1000  12000000000"
 )
 
 # Usage:
 #   bash run2_batch.sh [RUNS] [NUM_WORKERS]
-# Compares 3 adaptive_pull_elite_segments values per customer size, RUNS runs each (see run2.sh)
+# Compares 4 adaptive_pull_elite_segments values per customer size, RUNS runs each (see run2.sh)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN2_SCRIPT="${SCRIPT_DIR}/run2.sh"

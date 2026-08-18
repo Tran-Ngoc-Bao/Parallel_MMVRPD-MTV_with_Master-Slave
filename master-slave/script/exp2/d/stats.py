@@ -40,7 +40,7 @@ import re
 import statistics
 from pathlib import Path
 
-SEGMENTS_LIST = ["2", "4", "8"]
+SEGMENTS_LIST = ["2", "4", "6", "8"]
 
 
 def load_run(path: Path):
