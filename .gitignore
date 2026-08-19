@@ -5,3 +5,6 @@
 build/
 build_test/
 target/
+
+auto_push.sh
+auto_push.log

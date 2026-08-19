@@ -19,24 +19,24 @@ Instance    Pull        Accept       Runs     RPD(%)     AR(%)
 200.40.1    rank        selective       5     -0.703    65.272
 200.40.1    pullcount   always          5     -0.611         -
 200.40.1    pullcount   selective       5     -0.587    68.699
-500.10.2    random      always          0          -         -
-500.10.2    random      selective       0          -         -
-500.10.2    topk        always          0          -         -
-500.10.2    topk        selective       0          -         -
-500.10.2    rank        always          0          -         -
-500.10.2    rank        selective       0          -         -
-500.10.2    pullcount   always          0          -         -
-500.10.2    pullcount   selective       0          -         -
-500.40.1    random      always          0          -         -
-500.40.1    random      selective       0          -         -
-500.40.1    topk        always          0          -         -
-500.40.1    topk        selective       0          -         -
-500.40.1    rank        always          0          -         -
+500.10.2    random      always          5     -0.521         -
+500.10.2    random      selective       5     -0.937    67.575
+500.10.2    topk        always          5     -0.697         -
+500.10.2    topk        selective       5     -0.992    66.580
+500.10.2    rank        always          5     -0.820         -
+500.10.2    rank        selective       5     -1.067    60.938
+500.10.2    pullcount   always          5     -0.942         -
+500.10.2    pullcount   selective       5     -1.200    72.554
+500.40.1    random      always          5     -0.483         -
+500.40.1    random      selective       5     -0.157    68.354
+500.40.1    topk        always          5     -0.563         -
+500.40.1    topk        selective       5     -0.424    61.506
+500.40.1    rank        always          5     -0.384         -
 500.40.1    rank        selective       0          -         -
 500.40.1    pullcount   always          0          -         -
 500.40.1    pullcount   selective       0          -         -
 
-Note: fewer runs found than expected for: 500.10.2/random-always (0/3), 500.10.2/random-selective (0/3), 500.10.2/topk-always (0/3), 500.10.2/topk-selective (0/3), 500.10.2/rank-always (0/3), 500.10.2/rank-selective (0/3), 500.10.2/pullcount-always (0/3), 500.10.2/pullcount-selective (0/3), 500.40.1/random-always (0/3), 500.40.1/random-selective (0/3), 500.40.1/topk-always (0/3), 500.40.1/topk-selective (0/3), 500.40.1/rank-always (0/3), 500.40.1/rank-selective (0/3), 500.40.1/pullcount-always (0/3), 500.40.1/pullcount-selective (0/3)
+Note: fewer runs found than expected for: 500.40.1/rank-selective (0/3), 500.40.1/pullcount-always (0/3), 500.40.1/pullcount-selective (0/3)
 
 Instance    Pull          AlwaysRPD(%)  SelectRPD(%)  DeltaAcc(%)  SelectAR(%)
 ------------------------------------------------------------------------------
@@ -48,18 +48,18 @@ Instance    Pull          AlwaysRPD(%)  SelectRPD(%)  DeltaAcc(%)  SelectAR(%)
 200.40.1    topk                -0.754        -0.670       -0.084       61.134
 200.40.1    rank                -0.616        -0.703        0.087       65.272
 200.40.1    pullcount           -0.611        -0.587       -0.024       68.699
-500.10.2    random                   -             -            -            -
-500.10.2    topk                     -             -            -            -
-500.10.2    rank                     -             -            -            -
-500.10.2    pullcount                -             -            -            -
-500.40.1    random                   -             -            -            -
-500.40.1    topk                     -             -            -            -
-500.40.1    rank                     -             -            -            -
+500.10.2    random              -0.521        -0.937        0.417       67.575
+500.10.2    topk                -0.697        -0.992        0.295       66.580
+500.10.2    rank                -0.820        -1.067        0.247       60.938
+500.10.2    pullcount           -0.942        -1.200        0.258       72.554
+500.40.1    random              -0.483        -0.157       -0.326       68.354
+500.40.1    topk                -0.563        -0.424       -0.139       61.506
+500.40.1    rank                -0.384             -            -            -
 500.40.1    pullcount                -             -            -            -
 
 PullStrategy    AlwaysRPD(%)  SelectRPD(%)  DeltaAcc(%)  SelectAR(%)
 --------------------------------------------------------------------
-random                -0.546        -0.481       -0.065       64.544
-topk                  -0.612        -0.732        0.120       62.055
-rank                  -0.727        -0.814        0.087       62.423
-pullcount             -0.705        -0.358       -0.346       61.671
+random                -0.524        -0.514       -0.010       66.254
+topk                  -0.621        -0.720        0.099       63.049
+rank                  -0.665        -0.899        0.234       61.928
+pullcount             -0.784        -0.639       -0.145       65.299
