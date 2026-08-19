@@ -10,7 +10,7 @@ enum class ConfigType  { Low, High };
 enum class Strategy    { Random, Cyclic, Vns, Adaptive };
 enum class ElitePullStrategy { Random, TopK, Rank, PullCount, Off };
 enum class ElitePushStrategy { NewBest, SegmentBest, SignificantBest };
-enum class EliteReplaceStrategy { SimilarityOnly, SimilarityQuality, SimilarityPullFirst };
+enum class EliteReplaceStrategy { SimilarityAware, QualityOnly, RandomTarget };
 enum class ElitePullAcceptStrategy { Always, Selective };
 enum class DistanceType{ Manhattan, Euclidean };
 
@@ -55,9 +55,9 @@ inline const char* to_str(ElitePushStrategy s){
 }
 inline const char* to_str(EliteReplaceStrategy s){
     switch(s){
-        case EliteReplaceStrategy::SimilarityOnly:      return "similarity-only";
-        case EliteReplaceStrategy::SimilarityQuality:   return "similarity-quality";
-        case EliteReplaceStrategy::SimilarityPullFirst: return "similarity-pull-first";
+        case EliteReplaceStrategy::SimilarityAware: return "similarity-aware";
+        case EliteReplaceStrategy::QualityOnly:     return "quality-only";
+        case EliteReplaceStrategy::RandomTarget:    return "random-target";
     }
     return "";
 }
@@ -87,6 +87,7 @@ struct RunArgs {
     ElitePullStrategy elite_pull_strategy    = ElitePullStrategy::Random;
     ElitePullAcceptStrategy elite_pull_accept_strategy = ElitePullAcceptStrategy::Always;
     ElitePushStrategy elite_push_strategy    = ElitePushStrategy::NewBest;
+    double        elite_pull_quality_tolerance_pct = 1.0;
     ConfigType    speed_type                 = ConfigType::High;
     ConfigType    range_type                 = ConfigType::High;
     DistanceType  truck_distance             = DistanceType::Euclidean;
@@ -113,7 +114,7 @@ struct RunArgs {
     double        gamma_3                    = 0.1;
     double        gamma_4                    = 0.3;
     bool          randomize_worker_adaptive_hyperparams = false;
-    EliteReplaceStrategy elite_replace_strategy = EliteReplaceStrategy::SimilarityOnly;
+    EliteReplaceStrategy elite_replace_strategy = EliteReplaceStrategy::SimilarityAware;
     bool          compact_output             = false;
     std::string   run_id                     = "";
 };

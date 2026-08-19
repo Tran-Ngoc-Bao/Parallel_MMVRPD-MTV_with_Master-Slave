@@ -3,7 +3,7 @@
 Statistics for run2.sh (exp2/b, elite_pool_factor comparison).
 
 Compares 3 elite_pool_factor values (0.02, 0.06, 0.10), all run with
-elite-pull off, significant-best push strategy, and similarity-quality
+elite-pull off, significant-best push strategy, and similarity-aware
 pool replacement. For each value reports, from the elite pool still held
 at program end:
   - pool size: elite_pool_size

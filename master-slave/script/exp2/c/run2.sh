@@ -10,7 +10,7 @@ DEFAULT_DATA_PREFIX_FROM_FILE="$(
 )"
 DEFAULT_DATA_PREFIX="${DEFAULT_DATA_PREFIX:-${DEFAULT_DATA_PREFIX_FROM_FILE}}"
 DATA_PREFIX="${1:-${DEFAULT_DATA_PREFIX}}"
-RUNS="${2:-5}"
+RUNS="${2:-3}"
 SLEEP_SEC="${3:-0.0}"
 NUM_WORKERS="${4:-7}"
 MAX_EVALUATIONS="${5:-0}"
@@ -19,7 +19,7 @@ MAX_EVALUATIONS="${5:-0}"
 ADAPTIVE_ITERATIONS="60"
 ELITE_PUSH_STRATEGY="significant-best"
 ELITE_POOL_FACTOR="0.03"
-ELITE_REPLACE_STRATEGY="similarity-quality"
+ELITE_REPLACE_STRATEGY="similarity-aware"
 
 # Compare 4 elite-pull strategies (excluding off) x 2 elite-pull-accept strategies, RUNS runs each
 PULL_STRATEGIES=("random" "topk" "rank" "pullcount")

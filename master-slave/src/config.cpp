@@ -300,6 +300,7 @@ Config build_config(const cli::RunArgs& args)
     cfg.elite_pull_strategy       = args.elite_pull_strategy;
     cfg.elite_pull_accept_strategy = args.elite_pull_accept_strategy;
     cfg.elite_push_strategy       = args.elite_push_strategy;
+    cfg.elite_pull_quality_tolerance_pct = args.elite_pull_quality_tolerance_pct;
     cfg.fix_iteration             = args.fix_iteration;
     cfg.reset_after_factor        = args.reset_after_factor;
     cfg.max_elite_size            = args.max_elite_size;
@@ -371,9 +372,9 @@ static std::string elite_push_strategy_str(cli::ElitePushStrategy s) {
 }
 static std::string elite_replace_strategy_str(cli::EliteReplaceStrategy s) {
     switch(s) {
-        case cli::EliteReplaceStrategy::SimilarityOnly:      return "similarity-only";
-        case cli::EliteReplaceStrategy::SimilarityQuality:   return "similarity-quality";
-        case cli::EliteReplaceStrategy::SimilarityPullFirst: return "similarity-pull-first";
+        case cli::EliteReplaceStrategy::SimilarityAware: return "similarity-aware";
+        case cli::EliteReplaceStrategy::QualityOnly:     return "quality-only";
+        case cli::EliteReplaceStrategy::RandomTarget:    return "random-target";
     }
     return "";
 }
@@ -475,6 +476,7 @@ nlohmann::json config_to_json(const Config& cfg) {
     j["elite_pull_strategy"]       = elite_pull_strategy_str(cfg.elite_pull_strategy);
     j["elite_pull_accept_strategy"] = elite_pull_accept_strategy_str(cfg.elite_pull_accept_strategy);
     j["elite_push_strategy"]       = elite_push_strategy_str(cfg.elite_push_strategy);
+    j["elite_pull_quality_tolerance_pct"] = cfg.elite_pull_quality_tolerance_pct;
     if (cfg.fix_iteration)
         j["fix_iteration"]         = *cfg.fix_iteration;
     else
@@ -628,9 +630,9 @@ Config build_config_from_json(const std::string& json_path)
         return cli::ElitePushStrategy::NewBest;
     };
     auto elite_replace_from_str = [](const std::string& s) {
-        if (s == "similarity-quality")    return cli::EliteReplaceStrategy::SimilarityQuality;
-        if (s == "similarity-pull-first") return cli::EliteReplaceStrategy::SimilarityPullFirst;
-        return cli::EliteReplaceStrategy::SimilarityOnly;
+        if (s == "quality-only")  return cli::EliteReplaceStrategy::QualityOnly;
+        if (s == "random-target") return cli::EliteReplaceStrategy::RandomTarget;
+        return cli::EliteReplaceStrategy::SimilarityAware;
     };
 
     cfg.problem                   = j.at("problem").get<std::string>();
@@ -657,6 +659,7 @@ Config build_config_from_json(const std::string& json_path)
     cfg.elite_push_strategy       = j.contains("elite_push_strategy")
         ? elite_push_from_str(j.at("elite_push_strategy").get<std::string>())
         : cli::ElitePushStrategy::NewBest;
+    cfg.elite_pull_quality_tolerance_pct = j.value("elite_pull_quality_tolerance_pct", 1.0);
     if (!j.at("fix_iteration").is_null())
         cfg.fix_iteration         = j.at("fix_iteration").get<std::size_t>();
     cfg.reset_after_factor        = j.at("reset_after_factor").get<double>();
@@ -675,16 +678,9 @@ Config build_config_from_json(const std::string& json_path)
     cfg.gamma_3                   = j.at("gamma_3").get<double>();
     cfg.gamma_4                   = j.at("gamma_4").get<double>();
     cfg.randomize_worker_adaptive_hyperparams = j.at("randomize_worker_adaptive_hyperparams").get<bool>();
-    if (j.contains("elite_replace_strategy")) {
-        cfg.elite_replace_strategy = elite_replace_from_str(j.at("elite_replace_strategy").get<std::string>());
-    } else if (j.contains("prefer_pulled")) {
-        // Back-compat with configs saved before elite_replace_strategy existed.
-        cfg.elite_replace_strategy = j.at("prefer_pulled").get<bool>()
-            ? cli::EliteReplaceStrategy::SimilarityPullFirst
-            : cli::EliteReplaceStrategy::SimilarityOnly;
-    } else {
-        cfg.elite_replace_strategy = cli::EliteReplaceStrategy::SimilarityOnly;
-    }
+    cfg.elite_replace_strategy = j.contains("elite_replace_strategy")
+        ? elite_replace_from_str(j.at("elite_replace_strategy").get<std::string>())
+        : cli::EliteReplaceStrategy::SimilarityAware;
     cfg.compact_output            = j.at("compact_output").get<bool>();
     cfg.run_id                    = j.value("run_id", "");
     return cfg;

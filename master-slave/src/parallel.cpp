@@ -190,16 +190,25 @@ void recv_stats(int source, std::size_t& total_evaluations, std::size_t& push_co
     push_count        = j.at("push_count").get<std::size_t>();
 }
 
+// Cost comparison tolerance for floating-point solution costs.
+static bool is_significantly_better(double fx, double fe)
+{
+    return fx < fe - 1e-9 * std::max(1.0, std::abs(fe));
+}
+
 // offered: true iff at least one elite from a worker other than the
 // requester exists in the pool. solution: non-null iff that elite was
 // actually sent (offered && accepted).
 struct PickResult {
     bool offered = false;
     const Solution* solution = nullptr;
+    // Selective accept only: cost fell within the quality-tolerance window.
+    bool tolerance_satisfied = false;
 };
 
 struct ElitePool {
-    explicit ElitePool(std::size_t keep_count) : keep_count(keep_count) {}
+    explicit ElitePool(std::size_t keep_count, std::uint64_t seed = std::random_device{}())
+        : keep_count(keep_count), rng(seed) {}
 
     bool consider(Solution candidate, int source_worker, cli::EliteReplaceStrategy replace_strategy)
     {
@@ -226,16 +235,10 @@ struct ElitePool {
         auto is_older = [&](std::size_t i, std::size_t than) {
             return solutions[i].insertion_seq < solutions[than].insertion_seq;
         };
-        auto always_eligible = [](std::size_t) { return true; };
 
         std::optional<std::size_t> chosen;
         switch (replace_strategy) {
-            case cli::EliteReplaceStrategy::SimilarityOnly:
-                // Tie-break: replace the oldest of the equally-similar entries.
-                chosen = find_replacement(always_eligible, is_older);
-                break;
-
-            case cli::EliteReplaceStrategy::SimilarityQuality:
+            case cli::EliteReplaceStrategy::SimilarityAware:
                 // Tie-break: worst cost first, then oldest.
                 chosen = find_replacement(
                     [&](std::size_t i) { return solutions[i].sol.cost() > candidate.cost(); },
@@ -245,11 +248,24 @@ struct ElitePool {
                     });
                 break;
 
-            case cli::EliteReplaceStrategy::SimilarityPullFirst: {
-                chosen = find_replacement(
-                    [&](std::size_t i) { return solutions[i].pull_count > 0; }, is_older);
-                if (!chosen) {
-                    chosen = find_replacement(always_eligible, is_older);
+            case cli::EliteReplaceStrategy::QualityOnly: {
+                // Replace the worst-cost entry (tie-break: oldest), if the candidate beats it.
+                std::size_t worst = 0;
+                for (std::size_t i = 1; i < solutions.size(); ++i) {
+                    double ci = solutions[i].sol.cost(), cw = solutions[worst].sol.cost();
+                    if (ci > cw || (ci == cw && is_older(i, worst))) worst = i;
+                }
+                if (is_significantly_better(candidate.cost(), solutions[worst].sol.cost())) {
+                    chosen = worst;
+                }
+                break;
+            }
+
+            case cli::EliteReplaceStrategy::RandomTarget: {
+                std::uniform_int_distribution<std::size_t> dist(0, solutions.size() - 1);
+                std::size_t idx = dist(rng);
+                if (is_significantly_better(candidate.cost(), solutions[idx].sol.cost())) {
+                    chosen = idx;
                 }
                 break;
             }
@@ -394,26 +410,29 @@ struct ElitePool {
         // accept/reject outcome below.
         const double cost_e = picked->cost();
         const double cost_personal_best = requester_personal_best->cost();
+        const double quality_tolerance = 1.0 + global_config().elite_pull_quality_tolerance_pct / 100.0;
+        const bool tolerance_satisfied = cost_e <= quality_tolerance * cost_personal_best;
         if (cost_e < cost_personal_best) {
-            return {true, picked};
+            return {true, picked, tolerance_satisfied};
         }
-        if (cost_e <= 1.01 * cost_personal_best) {
-            std::vector<double> d_values;
-            d_values.reserve(candidates.size());
-            for (std::size_t idx : candidates) {
-                const double d = solutions[idx].sol.td_distance(*requester_personal_best);
-                if (d > 0.0) d_values.push_back(d);
-            }
-            if (!d_values.empty()) {
-                const double mean_d = std::accumulate(d_values.begin(), d_values.end(), 0.0)
-                                     / static_cast<double>(d_values.size());
-                const double d_e = picked->td_distance(*requester_personal_best);
-                if (d_e > mean_d) {
-                    return {true, picked};
-                }
+        if (!tolerance_satisfied) {
+            return {true, nullptr, false};
+        }
+        std::vector<double> d_values;
+        d_values.reserve(candidates.size());
+        for (std::size_t idx : candidates) {
+            const double d = solutions[idx].sol.td_distance(*requester_personal_best);
+            if (d > 0.0) d_values.push_back(d);
+        }
+        if (!d_values.empty()) {
+            const double mean_d = std::accumulate(d_values.begin(), d_values.end(), 0.0)
+                                 / static_cast<double>(d_values.size());
+            const double d_e = picked->td_distance(*requester_personal_best);
+            if (d_e > mean_d) {
+                return {true, picked, true};
             }
         }
-        return {true, nullptr};
+        return {true, nullptr, true};
     }
 
 private:
@@ -427,6 +446,7 @@ private:
     std::size_t keep_count;
     std::vector<Entry> solutions;
     std::size_t next_seq = 0;
+    std::mt19937_64 rng;
 };
 
 std::size_t compute_elite_pool_size(const Config& cfg, int world_size)
@@ -448,10 +468,9 @@ Solution run_master(int world_size)
     const cli::EliteReplaceStrategy elite_replace_strategy = base_cfg.elite_replace_strategy;
     std::optional<Solution> best_solution;
     const std::size_t elite_keep_count = compute_elite_pool_size(base_cfg, world_size);
-    ElitePool elite_pool(elite_keep_count);
-    const auto t1 = std::chrono::steady_clock::now();
-
     const std::size_t base_seed = base_cfg.seed ? *base_cfg.seed : 1;
+    ElitePool elite_pool(elite_keep_count, base_seed);
+    const auto t1 = std::chrono::steady_clock::now();
     std::vector<std::size_t> worker_search_seeds(static_cast<std::size_t>(world_size - 1), 0);
     std::vector<std::size_t> worker_coop_seeds(static_cast<std::size_t>(world_size - 1), 0);
     // Lazily seeded from each worker's coop_seed on its first pull request,
@@ -466,6 +485,8 @@ Solution run_master(int world_size)
     std::size_t pull_request_count = 0;
     std::size_t pull_offer_count = 0;
     std::size_t pull_accept_count = 0;
+    // Offers whose cost fell within the quality-tolerance window (see exp2/e).
+    std::size_t pull_tolerance_satisfied_count = 0;
     // Per-worker request counts only -- offer/accept are tracked globally
     // above (that's the granularity exp2/c and exp2/d actually need).
     std::vector<std::size_t> worker_pull_request_counts_by_rank(static_cast<std::size_t>(world_size), 0);
@@ -474,7 +495,9 @@ Solution run_master(int world_size)
         base_cfg.max_evaluations * static_cast<std::size_t>(world_size - 1);
     std::vector<std::size_t> latest_worker_evals(static_cast<std::size_t>(world_size), 0);
     std::size_t next_checkpoint = 0;
+    // Pool's own best cost (exp2/a) vs. true best solution found (exp2/d/e/f) -- can diverge under quality-only/random-target.
     std::vector<double> best_cost_by_checkpoint(9, 0.0);
+    std::vector<double> best_solution_cost_by_checkpoint(9, 0.0);
     std::vector<bool> checkpoint_captured(9, false);
 
     auto current_running_total = [&]() {
@@ -483,11 +506,12 @@ Solution run_master(int world_size)
         return total;
     };
 
-    // Guards against an empty pool (best_cost() == +infinity, which would
-    // serialize as JSON null) -- skips and retries on a later call instead.
+    // Guards against an empty pool / no best_solution yet (would serialize
+    // as JSON null) -- skips and retries on a later call instead.
     auto capture_checkpoint = [&](std::size_t idx) {
-        if (checkpoint_captured[idx] || elite_pool.empty()) return;
+        if (checkpoint_captured[idx] || elite_pool.empty() || !best_solution) return;
         best_cost_by_checkpoint[idx] = elite_pool.best_cost();
+        best_solution_cost_by_checkpoint[idx] = best_solution->cost();
         checkpoint_captured[idx] = true;
     };
 
@@ -585,6 +609,7 @@ Solution run_master(int world_size)
                     requester_personal_best ? &*requester_personal_best : nullptr);
                 if (pick.offered) ++pull_offer_count;
                 if (pick.solution) ++pull_accept_count;
+                if (pick.tolerance_satisfied) ++pull_tolerance_satisfied_count;
                 elite_to_send = pick.solution;
             }
 
@@ -660,7 +685,9 @@ Solution run_master(int world_size)
                      elite_pool.size(), elite_pool.diversity(), elite_pool.costs(),
                      worker_search_seeds, worker_coop_seeds,
                      pull_offer_count, pull_accept_count,
-                     pull_request_count, worker_pull_request_counts);
+                     pull_request_count, worker_pull_request_counts,
+                     pull_tolerance_satisfied_count,
+                     evaluation_budget > 0 ? best_solution_cost_by_checkpoint : std::vector<double>{});
     return *best_solution;
 }
 

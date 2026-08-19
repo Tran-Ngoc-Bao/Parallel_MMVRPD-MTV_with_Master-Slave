@@ -118,10 +118,15 @@ int main(int argc, char** argv)
     run_cmd->add_option("--elite-push-strategy", args.run.elite_push_strategy)->transform(
         CLI::CheckedTransformer(elite_push_map, CLI::ignore_case));
 
+    run_cmd->add_option("--elite-pull-quality-tolerance-pct", args.run.elite_pull_quality_tolerance_pct,
+        "Selective accept: an offered elite within this % of the requester's "
+        "personal-best cost can still be accepted if more diverse than average "
+        "(e.g. 1.0 = 1%, 0.5 = 0.5%, 2.0 = 2%)");
+
     std::map<std::string, cli::EliteReplaceStrategy> elite_replace_map{
-        {"similarity-only",       cli::EliteReplaceStrategy::SimilarityOnly},
-        {"similarity-quality",    cli::EliteReplaceStrategy::SimilarityQuality},
-        {"similarity-pull-first", cli::EliteReplaceStrategy::SimilarityPullFirst}
+        {"similarity-aware", cli::EliteReplaceStrategy::SimilarityAware},
+        {"quality-only",     cli::EliteReplaceStrategy::QualityOnly},
+        {"random-target",    cli::EliteReplaceStrategy::RandomTarget}
     };
     run_cmd->add_option("--elite-replace-strategy", args.run.elite_replace_strategy)->transform(
         CLI::CheckedTransformer(elite_replace_map, CLI::ignore_case));

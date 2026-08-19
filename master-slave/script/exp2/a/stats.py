@@ -3,13 +3,16 @@
 Statistics for run2.sh (exp2/a, elite-push-strategy comparison).
 
 Compares the 3 elite-push strategies (new-best, segment-best,
-significant-best), all run with elite-pull off and similarity-quality
+significant-best), all run with elite-pull off and similarity-aware
 pool replacement. For each strategy reports:
   - push rate: total_elite_pushes per 1,000,000 total_evaluations
   - reduction (%): push-rate reduction vs new-best (baseline, 0%)
   - accept (%): accepted_elite_pushes / total_elite_pushes
-  - R2, R4, R8: RPD (%) of best_cost_by_evaluation_checkpoint at 2/8,
-    4/8, 8/8 of the evaluation budget, vs BKS working_time
+  - R2, R4, R8: RPD (%) of best_cost_by_evaluation_checkpoint (the elite
+    pool's own best cost -- what push strategies are actually populating
+    the pool with, which is what this experiment is about; see exp2/d/e/f
+    for the true-best-solution-based checkpoint instead) at 2/8, 4/8, 8/8
+    of the evaluation budget, vs BKS working_time
   - irpd (%): trapezoidal-rule average of R0..R8:
     (1/8) * [(R0+R8)/2 + R1+...+R7]
 
@@ -93,7 +96,7 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
     for push_strategy in PUSH_STRATEGIES:
         run_files = find_run_files(outputs_dir, n, instance, push_strategy)
 
-        push_rates, accept_pcts, r_per_run = [], [], []
+        push_rates, accept_pcts, r_per_run, irpds_per_run = [], [], [], []
         for run_id, path in run_files:
             data = load_run(path)
             p = data["total_elite_pushes"]
@@ -106,7 +109,9 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
             push_rates.append(run_push_rate)
             accept_pcts.append(run_accept_pct)
             if len(cps) == NUM_CHECKPOINTS:
-                r_per_run.append([rpd_pct(v, bks_value) for v in cps])
+                run_r = [rpd_pct(v, bks_value) for v in cps]
+                r_per_run.append(run_r)
+                irpds_per_run.append(irpd_pct(run_r))
 
             detail_rows.append({
                 "n": n, "instance": instance, "push_strategy": push_strategy, "run": run_id,
@@ -122,13 +127,18 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
         push_rate = mean_or_none(push_rates)
         accept_pct = mean_or_none(accept_pcts)
 
+        # R0..R8 are shown as their own columns, so still averaged per
+        # checkpoint index across runs. irpd is instead computed per run
+        # first (from that run's own R0..R8), then averaged over runs --
+        # equivalent by linearity when no run has partial-missing
+        # checkpoints, but correct even if that ever stops holding.
         r = [None] * NUM_CHECKPOINTS
         if r_per_run:
             r = [mean_or_none(vals) for vals in zip(*r_per_run)]
 
         per_strategy[push_strategy] = {
             "runs": len(run_files), "push_rate": push_rate, "accept_pct": accept_pct,
-            "r": r, "irpd": irpd_pct(r),
+            "r": r, "irpd": mean_or_none(irpds_per_run),
         }
 
     baseline_rate = per_strategy["new-best"]["push_rate"]

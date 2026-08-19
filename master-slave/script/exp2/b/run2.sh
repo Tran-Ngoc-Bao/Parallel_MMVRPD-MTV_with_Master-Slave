@@ -19,7 +19,7 @@ MAX_EVALUATIONS="${5:-0}"
 ADAPTIVE_ITERATIONS="60"
 ELITE_PULL_STRATEGY="off"
 ELITE_PUSH_STRATEGY="significant-best"
-ELITE_REPLACE_STRATEGY="similarity-quality"
+ELITE_REPLACE_STRATEGY="similarity-aware"
 
 # Compare 3 elite_pool_factor values, RUNS runs each
 POOL_FACTORS=("0.02" "0.03" "0.04")

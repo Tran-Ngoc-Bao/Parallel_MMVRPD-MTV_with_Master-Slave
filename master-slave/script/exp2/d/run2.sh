@@ -10,7 +10,7 @@ DEFAULT_DATA_PREFIX_FROM_FILE="$(
 )"
 DEFAULT_DATA_PREFIX="${DEFAULT_DATA_PREFIX:-${DEFAULT_DATA_PREFIX_FROM_FILE}}"
 DATA_PREFIX="${1:-${DEFAULT_DATA_PREFIX}}"
-RUNS="${2:-5}"
+RUNS="${2:-3}"
 SLEEP_SEC="${3:-0.0}"
 NUM_WORKERS="${4:-7}"
 MAX_EVALUATIONS="${5:-0}"
@@ -21,14 +21,20 @@ ELITE_PULL_STRATEGY="rank"
 ELITE_PULL_ACCEPT_STRATEGY="selective"
 ELITE_PUSH_STRATEGY="significant-best"
 ELITE_POOL_FACTOR="0.03"
-ELITE_REPLACE_STRATEGY="similarity-quality"
+ELITE_REPLACE_STRATEGY="similarity-aware"
 
 # Compare 3 adaptive_pull_elite_segments values, RUNS runs each
 SEGMENTS_LIST=("2" "4" "8")
 
+COMBOS=("10.2" "40.1")
+case "${DATA_PREFIX}" in
+    200) COMBOS+=("20.3") ;;
+    500) COMBOS+=("30.4") ;;
+esac
+
 DATA_DIR="${SCRIPT_DIR}/../../../../data"
 DATA_FILES=()
-for COMBO in "10.2" "40.1"; do
+for COMBO in "${COMBOS[@]}"; do
     DATA_FILE="${DATA_DIR}/${DATA_PREFIX}.${COMBO}.txt"
     if [ -f "${DATA_FILE}" ]; then
         DATA_FILES+=("${DATA_FILE}")

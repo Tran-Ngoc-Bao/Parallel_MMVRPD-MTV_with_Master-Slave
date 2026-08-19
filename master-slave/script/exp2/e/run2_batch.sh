@@ -9,7 +9,7 @@ JOBS=(
 
 # Usage:
 #   bash run2_batch.sh [RUNS] [NUM_WORKERS]
-# Compares 3 elite_pool_factor values per customer size, RUNS runs each (see run2.sh)
+# Compares 3 elite_pull_quality_tolerance_pct values per customer size, RUNS runs each (see run2.sh)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN2_SCRIPT="${SCRIPT_DIR}/run2.sh"

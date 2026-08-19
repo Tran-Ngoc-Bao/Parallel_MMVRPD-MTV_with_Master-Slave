@@ -149,6 +149,10 @@ struct Config {
     cli::ElitePullStrategy elite_pull_strategy     = cli::ElitePullStrategy::Random;
     cli::ElitePullAcceptStrategy elite_pull_accept_strategy = cli::ElitePullAcceptStrategy::Always;
     cli::ElitePushStrategy elite_push_strategy     = cli::ElitePushStrategy::NewBest;
+    // Selective accept: an offered elite within this % of the requester's
+    // personal-best cost can still be accepted if it's more diverse than
+    // average (see pick_for_dispatch in parallel.cpp). E.g. 1.0 = 1%.
+    double               elite_pull_quality_tolerance_pct = 1.0;
     std::optional<std::size_t> fix_iteration       = std::nullopt;
     double               reset_after_factor        = 125.0;
     std::size_t          max_elite_size            = 0;
@@ -168,7 +172,7 @@ struct Config {
     double          gamma_3                        = 0.1;
     double          gamma_4                        = 0.3;
     bool            randomize_worker_adaptive_hyperparams = false;
-    cli::EliteReplaceStrategy elite_replace_strategy = cli::EliteReplaceStrategy::SimilarityOnly;
+    cli::EliteReplaceStrategy elite_replace_strategy = cli::EliteReplaceStrategy::SimilarityAware;
     bool            compact_output                 = false;
     std::string     run_id                         = "";
 };
