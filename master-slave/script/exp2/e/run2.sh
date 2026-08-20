@@ -18,7 +18,7 @@ MAX_EVALUATIONS="${5:-0}"
 # Fixed settings for this experiment
 ADAPTIVE_ITERATIONS="60"
 # Best value from exp2/d -- override via env var until that's been run.
-ADAPTIVE_PULL_ELITE_SEGMENTS="${ADAPTIVE_PULL_ELITE_SEGMENTS:-4}"
+ADAPTIVE_PULL_ELITE_SEGMENTS="8"
 ELITE_PULL_STRATEGY="rank"
 ELITE_PULL_ACCEPT_STRATEGY="selective"
 ELITE_PUSH_STRATEGY="significant-best"
