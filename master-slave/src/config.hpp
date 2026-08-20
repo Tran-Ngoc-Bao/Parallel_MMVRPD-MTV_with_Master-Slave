@@ -157,6 +157,7 @@ struct Config {
     double               reset_after_factor        = 125.0;
     std::size_t          max_elite_size            = 0;
     double               elite_pool_factor         = 0.03;
+    std::size_t          elite_pool_size           = 0;
     std::size_t          max_evaluations           = 0;
     double               penalty_exponent          = 0.5;
     bool                 single_truck_route        = false;
@@ -172,7 +173,7 @@ struct Config {
     double          gamma_3                        = 0.1;
     double          gamma_4                        = 0.3;
     bool            randomize_worker_adaptive_hyperparams = false;
-    cli::EliteReplaceStrategy elite_replace_strategy = cli::EliteReplaceStrategy::SimilarityAware;
+    cli::EliteReplaceStrategy elite_replace_strategy = cli::EliteReplaceStrategy::TDCrowding;
     bool            compact_output                 = false;
     std::string     run_id                         = "";
 };

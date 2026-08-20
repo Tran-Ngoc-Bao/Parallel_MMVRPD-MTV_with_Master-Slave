@@ -85,6 +85,8 @@ int main(int argc, char** argv)
     run_cmd->add_option("--ejection-chain-iterations", args.run.ejection_chain_iterations);
     run_cmd->add_option("--destroy-rate",              args.run.destroy_rate);
     run_cmd->add_option("--elite-pool-factor",         args.run.elite_pool_factor);
+    run_cmd->add_option("--elite-pool-size",           args.run.elite_pool_size,
+        "If non-zero, used directly as the elite pool capacity, bypassing --elite-pool-factor");
     run_cmd->add_option("--gamma-1",                   args.run.gamma_1);
     run_cmd->add_option("--gamma-2",                   args.run.gamma_2);
     run_cmd->add_option("--gamma-3",                   args.run.gamma_3);
@@ -124,9 +126,10 @@ int main(int argc, char** argv)
         "(e.g. 1.0 = 1%, 0.5 = 0.5%, 2.0 = 2%)");
 
     std::map<std::string, cli::EliteReplaceStrategy> elite_replace_map{
-        {"similarity-aware", cli::EliteReplaceStrategy::SimilarityAware},
-        {"quality-only",     cli::EliteReplaceStrategy::QualityOnly},
-        {"random-target",    cli::EliteReplaceStrategy::RandomTarget}
+        {"td-crowding",   cli::EliteReplaceStrategy::TDCrowding},
+        {"edge-crowding", cli::EliteReplaceStrategy::EdgeCrowding},
+        {"quality-only",  cli::EliteReplaceStrategy::QualityOnly},
+        {"random-target", cli::EliteReplaceStrategy::RandomTarget}
     };
     run_cmd->add_option("--elite-replace-strategy", args.run.elite_replace_strategy)->transform(
         CLI::CheckedTransformer(elite_replace_map, CLI::ignore_case));

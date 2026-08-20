@@ -16,12 +16,7 @@ NUM_WORKERS="${4:-7}"
 MAX_EVALUATIONS="${5:-0}"
 
 # Fixed settings for this experiment
-ADAPTIVE_ITERATIONS="60"
-ELITE_PULL_STRATEGY="rank"
-ELITE_PULL_ACCEPT_STRATEGY="selective"
-ELITE_PUSH_STRATEGY="significant-best"
 ELITE_POOL_FACTOR="0.03"
-ELITE_REPLACE_STRATEGY="similarity-aware"
 
 # Compare 3 adaptive_pull_elite_segments values, RUNS runs each
 SEGMENTS_LIST=("2" "4" "8")
@@ -62,12 +57,7 @@ for DATA_FILE in "${DATA_FILES[@]}"; do
             SEED=$(( x * 100 ))
             echo "=== ${DATA_FILE_NAME} segments=${SEGMENTS} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
             NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
-                ADAPTIVE_ITERATIONS="${ADAPTIVE_ITERATIONS}" \
-                ELITE_PULL_STRATEGY="${ELITE_PULL_STRATEGY}" \
-                ELITE_PULL_ACCEPT_STRATEGY="${ELITE_PULL_ACCEPT_STRATEGY}" \
-                ELITE_PUSH_STRATEGY="${ELITE_PUSH_STRATEGY}" \
                 ELITE_POOL_FACTOR="${ELITE_POOL_FACTOR}" \
-                ELITE_REPLACE_STRATEGY="${ELITE_REPLACE_STRATEGY}" \
                 ADAPTIVE_PULL_ELITE_SEGMENTS="${SEGMENTS}" \
                 OUTPUTS_DIR="${OUTPUT_DIR}" \
                 RUN_ID="${RUN_ID}" \

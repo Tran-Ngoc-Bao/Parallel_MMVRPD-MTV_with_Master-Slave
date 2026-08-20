@@ -16,13 +16,29 @@ NUM_WORKERS="${4:-7}"
 MAX_EVALUATIONS="${5:-0}"
 
 # Fixed settings for this experiment
-ADAPTIVE_ITERATIONS="60"
 ELITE_PULL_STRATEGY="off"
-ELITE_PUSH_STRATEGY="significant-best"
-ELITE_REPLACE_STRATEGY="similarity-aware"
 
-# Compare 3 elite_pool_factor values, RUNS runs each
-POOL_FACTORS=("0.02" "0.03" "0.04")
+# Compare hand-picked elite_pool_size values via --elite-pool-size, grouped
+# into named "sets" (bo1..bo4). Each set fixes a pool size per customer
+# count:
+#   bo1: 200->2, 500->3
+#   bo2: 200->3, 500->4
+#   bo3: 200->3, 500->5
+#   bo4: 200->4, 500->5
+case "${DATA_PREFIX}" in
+    200)
+        SET_NAMES=("bo1" "bo2" "bo3" "bo4")
+        POOL_SIZES=("2"   "3"   "3"   "4")
+        ;;
+    500)
+        SET_NAMES=("bo1" "bo2" "bo3" "bo4")
+        POOL_SIZES=("3"   "4"   "5"   "5")
+        ;;
+    *)
+        echo "No elite_pool_size sets configured for DATA_PREFIX=${DATA_PREFIX}" >&2
+        exit 1
+        ;;
+esac
 
 DATA_DIR="${SCRIPT_DIR}/../../../../data"
 DATA_FILES=()
@@ -43,22 +59,48 @@ mkdir -p "${OUTPUT_DIR}"
 
 for DATA_FILE in "${DATA_FILES[@]}"; do
     DATA_FILE_NAME="$(basename "${DATA_FILE}" .txt)"
-    for POOL_FACTOR in "${POOL_FACTORS[@]}"; do
+    for ((i = 0; i < ${#SET_NAMES[@]}; i++)); do
+        SET_NAME="${SET_NAMES[$i]}"
+        POOL_SIZE="${POOL_SIZES[$i]}"
+
+        CANONICAL_SET=""
+        for ((j = 0; j < i; j++)); do
+            if [ "${POOL_SIZES[$j]}" = "${POOL_SIZE}" ]; then
+                CANONICAL_SET="${SET_NAMES[$j]}"
+                break
+            fi
+        done
+
         for ((x = 1; x <= RUNS; x++)); do
-            RUN_ID="pool${POOL_FACTOR}-${x}"
+            RUN_ID="${SET_NAME}-${x}"
             OUT_FILE="${OUTPUT_DIR}/${DATA_FILE_NAME}-${RUN_ID}.json"
             if [ -f "${OUT_FILE}" ]; then
-                echo "=== ${DATA_FILE_NAME} pool=${POOL_FACTOR} run ${x}/${RUNS}: already have ${OUT_FILE}, skipping ==="
+                echo "=== ${DATA_FILE_NAME} ${SET_NAME} (pool_size=${POOL_SIZE}) run ${x}/${RUNS}: already have ${OUT_FILE}, skipping ==="
                 continue
             fi
+
+            if [ -n "${CANONICAL_SET}" ]; then
+                CANONICAL_FILE="${OUTPUT_DIR}/${DATA_FILE_NAME}-${CANONICAL_SET}-${x}.json"
+                if [ -f "${CANONICAL_FILE}" ]; then
+                    echo "=== ${DATA_FILE_NAME} ${SET_NAME} (pool_size=${POOL_SIZE}) run ${x}/${RUNS}: same config as ${CANONICAL_SET}, reusing its result ==="
+                    python3 - "${CANONICAL_FILE}" "${OUT_FILE}" "${RUN_ID}" <<'PYEOF'
+import json, sys
+src, dst, run_id = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(src) as f:
+    data = json.load(f)
+data["config"]["run_id"] = run_id
+with open(dst, "w") as f:
+    json.dump(data, f)
+PYEOF
+                    continue
+                fi
+            fi
+
             SEED=$(( x * 100 ))
-            echo "=== ${DATA_FILE_NAME} pool=${POOL_FACTOR} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
+            echo "=== ${DATA_FILE_NAME} ${SET_NAME} (pool_size=${POOL_SIZE}) run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
             NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
-                ADAPTIVE_ITERATIONS="${ADAPTIVE_ITERATIONS}" \
                 ELITE_PULL_STRATEGY="${ELITE_PULL_STRATEGY}" \
-                ELITE_PUSH_STRATEGY="${ELITE_PUSH_STRATEGY}" \
-                ELITE_POOL_FACTOR="${POOL_FACTOR}" \
-                ELITE_REPLACE_STRATEGY="${ELITE_REPLACE_STRATEGY}" \
+                ELITE_POOL_SIZE="${POOL_SIZE}" \
                 OUTPUTS_DIR="${OUTPUT_DIR}" \
                 RUN_ID="${RUN_ID}" \
                 bash "${RUN_SCRIPT}" "${DATA_FILE}"

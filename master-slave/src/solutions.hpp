@@ -51,6 +51,9 @@ struct Solution {
         std::function<void(const Solution& elite)> push_elite;
         std::function<bool(std::size_t iteration, const Solution& personal_best, Solution& pulled_elite)> pull_elite;
         std::function<void(std::size_t total_evaluations)> report_progress;
+        // Called once per successful pull whose round (up to the next pull, or
+        // search end) improved on the personal best held at pull time.
+        std::function<void()> pull_round_improved;
     };
 
     static Solution make(
@@ -78,6 +81,15 @@ struct Solution {
     // where this solution has an excess. Used by the elite pool to find
     // the existing entry most similar to a candidate for replacement.
     size_t edge_distance(const Solution& other) const;
+
+    // Canonical fingerprint: equal keys iff solutions agree on realized
+    // truck/drone mode, physical-vehicle grouping, trip composition, and
+    // within-trip visit order -- after quotienting out homogeneous-vehicle
+    // labels and trip presentation order. Ground truth for verifying
+    // td_distance/edge_distance "duplicate" calls (== 0), which are
+    // floating-point and can be off by a hair.
+    std::string canonical_structural_key() const;
+    bool is_structural_duplicate(const Solution& other) const;
 
     void verify() const;
 

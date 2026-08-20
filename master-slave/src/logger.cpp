@@ -175,7 +175,10 @@ void Logger::finalize(const Solution& result,
                       std::size_t pull_request_count,
                       const std::vector<std::size_t>& worker_pull_request_counts,
                       std::size_t pull_tolerance_satisfied_count,
-                      const std::vector<double>& best_solution_cost_by_evaluation_checkpoint)
+                      const std::vector<double>& best_solution_cost_by_evaluation_checkpoint,
+                      const std::vector<double>& diversity_by_evaluation_checkpoint,
+                      std::size_t pull_round_improved_count,
+                      const std::vector<std::size_t>& worker_pull_round_improved_counts)
 {
     this->total_evaluations = total_evaluations;
 
@@ -210,6 +213,7 @@ void Logger::finalize(const Solution& result,
     run["evaluation_checkpoint_budget"]        = evaluation_checkpoint_budget;
     run["best_cost_by_evaluation_checkpoint"]  = best_cost_by_evaluation_checkpoint;
     run["best_solution_cost_by_evaluation_checkpoint"] = best_solution_cost_by_evaluation_checkpoint;
+    run["diversity_by_evaluation_checkpoint"]  = diversity_by_evaluation_checkpoint;
     run["elite_pool_size"]                     = elite_pool_size;
     run["elite_pool_diversity"]                = elite_pool_diversity;
     run["elite_pool_costs"]                    = elite_pool_costs;
@@ -220,6 +224,7 @@ void Logger::finalize(const Solution& result,
     run["pull_request_rate_per_million_evals"] = total_evaluations > 0
         ? static_cast<double>(pull_request_count) / static_cast<double>(total_evaluations) * 1e6
         : 0.0;
+    run["pull_round_improved_count"]           = pull_round_improved_count;
 
     nlohmann::json worker_seeds_json = nlohmann::json::array();
     for (std::size_t i = 0; i < worker_search_seeds.size(); ++i) {
@@ -234,8 +239,10 @@ void Logger::finalize(const Solution& result,
     nlohmann::json worker_pull_stats_json = nlohmann::json::array();
     for (std::size_t i = 0; i < worker_pull_request_counts.size(); ++i) {
         nlohmann::json w;
-        w["worker"]         = i + 1;
-        w["request_count"]  = worker_pull_request_counts[i];
+        w["worker"]                = i + 1;
+        w["request_count"]         = worker_pull_request_counts[i];
+        w["round_improved_count"]  = i < worker_pull_round_improved_counts.size()
+            ? worker_pull_round_improved_counts[i] : 0;
         worker_pull_stats_json.push_back(w);
     }
     run["worker_pull_stats"]                   = worker_pull_stats_json;

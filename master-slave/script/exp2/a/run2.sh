@@ -16,9 +16,8 @@ NUM_WORKERS="${4:-7}"
 MAX_EVALUATIONS="${5:-0}"
 
 # Fixed settings for this experiment
-ADAPTIVE_ITERATIONS="60"
 ELITE_PULL_STRATEGY="off"
-ELITE_REPLACE_STRATEGY="similarity-aware"
+ELITE_POOL_FACTOR="0.03"
 
 # Compare all 3 push strategies, RUNS runs each
 PUSH_STRATEGIES=("new-best" "segment-best" "significant-best")
@@ -53,10 +52,8 @@ for DATA_FILE in "${DATA_FILES[@]}"; do
             SEED=$(( x * 100 ))
             echo "=== ${DATA_FILE_NAME} push=${PUSH_STRATEGY} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
             NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
-                ADAPTIVE_ITERATIONS="${ADAPTIVE_ITERATIONS}" \
                 ELITE_PULL_STRATEGY="${ELITE_PULL_STRATEGY}" \
                 ELITE_PUSH_STRATEGY="${PUSH_STRATEGY}" \
-                ELITE_REPLACE_STRATEGY="${ELITE_REPLACE_STRATEGY}" \
                 OUTPUTS_DIR="${OUTPUT_DIR}" \
                 RUN_ID="${RUN_ID}" \
                 bash "${RUN_SCRIPT}" "${DATA_FILE}"

@@ -10,7 +10,7 @@ enum class ConfigType  { Low, High };
 enum class Strategy    { Random, Cyclic, Vns, Adaptive };
 enum class ElitePullStrategy { Random, TopK, Rank, PullCount, Off };
 enum class ElitePushStrategy { NewBest, SegmentBest, SignificantBest };
-enum class EliteReplaceStrategy { SimilarityAware, QualityOnly, RandomTarget };
+enum class EliteReplaceStrategy { TDCrowding, EdgeCrowding, QualityOnly, RandomTarget };
 enum class ElitePullAcceptStrategy { Always, Selective };
 enum class DistanceType{ Manhattan, Euclidean };
 
@@ -55,9 +55,10 @@ inline const char* to_str(ElitePushStrategy s){
 }
 inline const char* to_str(EliteReplaceStrategy s){
     switch(s){
-        case EliteReplaceStrategy::SimilarityAware: return "similarity-aware";
-        case EliteReplaceStrategy::QualityOnly:     return "quality-only";
-        case EliteReplaceStrategy::RandomTarget:    return "random-target";
+        case EliteReplaceStrategy::TDCrowding:   return "td-crowding";
+        case EliteReplaceStrategy::EdgeCrowding: return "edge-crowding";
+        case EliteReplaceStrategy::QualityOnly:  return "quality-only";
+        case EliteReplaceStrategy::RandomTarget: return "random-target";
     }
     return "";
 }
@@ -84,6 +85,8 @@ struct RunArgs {
     std::size_t   ejection_chain_iterations  = 0;
     double        destroy_rate               = 0.1;
     double        elite_pool_factor          = 0.03;
+    // 0 = derive from elite_pool_factor; non-zero = used directly as the elite pool capacity.
+    std::size_t   elite_pool_size            = 0;
     ElitePullStrategy elite_pull_strategy    = ElitePullStrategy::Random;
     ElitePullAcceptStrategy elite_pull_accept_strategy = ElitePullAcceptStrategy::Always;
     ElitePushStrategy elite_push_strategy    = ElitePushStrategy::NewBest;
@@ -114,7 +117,7 @@ struct RunArgs {
     double        gamma_3                    = 0.1;
     double        gamma_4                    = 0.3;
     bool          randomize_worker_adaptive_hyperparams = false;
-    EliteReplaceStrategy elite_replace_strategy = EliteReplaceStrategy::SimilarityAware;
+    EliteReplaceStrategy elite_replace_strategy = EliteReplaceStrategy::TDCrowding;
     bool          compact_output             = false;
     std::string   run_id                     = "";
 };

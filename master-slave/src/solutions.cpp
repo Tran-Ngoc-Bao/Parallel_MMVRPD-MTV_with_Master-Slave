@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <array>
+#include <sstream>
 
 // -----------------------------------------------------------------------
 // Penalty coefficients
@@ -423,6 +424,47 @@ size_t Solution::edge_distance(const Solution& other) const {
     }
 
     return edge_loss_raw;
+}
+
+// -----------------------------------------------------------------------
+// canonical_structural_key
+// -----------------------------------------------------------------------
+namespace {
+
+// Canonical form of one fleet: trips within a vehicle sorted, then vehicles sorted (both unlabeled).
+template <typename RouteVec>
+std::string canonical_fleet(const RouteVec& routes, char mode_tag) {
+    std::vector<std::string> vehicle_reprs;
+    vehicle_reprs.reserve(routes.size());
+    for (const auto& vehicle_routes : routes) {
+        std::vector<std::string> trip_reprs;
+        trip_reprs.reserve(vehicle_routes.size());
+        for (const auto& route : vehicle_routes) {
+            const auto& c = route->data().customers;  // [depot, c1, ..., ck, depot]
+            std::ostringstream oss;
+            oss << mode_tag;
+            for (std::size_t p = 1; p + 1 < c.size(); ++p) oss << ',' << c[p];
+            trip_reprs.push_back(oss.str());
+        }
+        std::sort(trip_reprs.begin(), trip_reprs.end());  // trip presentation order doesn't matter
+        std::string vehicle_repr;
+        for (const auto& t : trip_reprs) { vehicle_repr += t; vehicle_repr += ';'; }
+        vehicle_reprs.push_back(std::move(vehicle_repr));
+    }
+    std::sort(vehicle_reprs.begin(), vehicle_reprs.end());  // homogeneous vehicles are unlabeled
+    std::string fleet_repr;
+    for (const auto& v : vehicle_reprs) { fleet_repr += v; fleet_repr += '|'; }
+    return fleet_repr;
+}
+
+} // namespace
+
+std::string Solution::canonical_structural_key() const {
+    return canonical_fleet(truck_routes, 'T') + "#" + canonical_fleet(drone_routes, 'D');
+}
+
+bool Solution::is_structural_duplicate(const Solution& other) const {
+    return canonical_structural_key() == other.canonical_structural_key();
 }
 
 // -----------------------------------------------------------------------
@@ -994,8 +1036,15 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
         hooks->push_elite(root);
     }
 
+    // Tracks whether the current pull round (since the last successful pull
+    // received from master) has improved on the personal best held at pull
+    // time -- see hooks->pull_round_improved.
+    bool has_pending_pull = false;
+    bool improved_since_pull = false;
+
     auto record_new = [&](const Solution& nb, size_t iteration, size_t segment, bool allow_push = true) {
         if (nb.cost() + TOLERANCE < result.cost() && nb.feasible) {
+            if (has_pending_pull) improved_since_pull = true;
             result       = nb;
             last_improved = iteration;
             adaptive.last_improved_seg = segment;
@@ -1013,17 +1062,23 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                     }
 
                 if (cfg.max_elite_size > 0) {
-                    if (elite_set.size() == cfg.max_elite_size) {
-                        // Remove least diverse
-                        size_t min_idx = 0;
-                        double min_hd  = elite_set[0].td_distance(result);
-                        for (size_t i = 1; i < elite_set.size(); ++i) {
-                            double hd = elite_set[i].td_distance(result);
-                            if (hd < min_hd) { min_hd = hd; min_idx = i; }
-                        }
-                        swap_remove_elem(elite_set, min_idx);
+                    bool is_duplicate = false;
+                    for (const auto& e : elite_set) {
+                        if (nb.is_structural_duplicate(e)) { is_duplicate = true; break; }
                     }
-                    elite_set.push_back(nb);
+                    if (!is_duplicate) {
+                        if (elite_set.size() == cfg.max_elite_size) {
+                            // Remove least diverse
+                            size_t min_idx = 0;
+                            double min_hd  = elite_set[0].td_distance(result);
+                            for (size_t i = 1; i < elite_set.size(); ++i) {
+                                double hd = elite_set[i].td_distance(result);
+                                if (hd < min_hd) { min_hd = hd; min_idx = i; }
+                            }
+                            swap_remove_elem(elite_set, min_idx);
+                        }
+                        elite_set.push_back(nb);
+                    }
                 }
             }
 
@@ -1185,6 +1240,12 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                     Solution pulled_elite;
                     bool pulled = hooks->pull_elite(iteration, result, pulled_elite);
                     if (pulled) {
+                        if (has_pending_pull && improved_since_pull && hooks->pull_round_improved) {
+                            hooks->pull_round_improved();
+                        }
+                        has_pending_pull = true;
+                        improved_since_pull = false;
+
                         record_new(pulled_elite, iteration, adaptive.segment, /*allow_push=*/false);
                         current = std::move(pulled_elite);
                         for (auto& tl : tabu_lists) {
@@ -1310,6 +1371,10 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
 
     // post_optimization stub (not implemented, matches Rust comment-out)
     double post_opt = 0.0, post_opt_elapsed = 0.0;
+
+    if (has_pending_pull && improved_since_pull && hooks && hooks->pull_round_improved) {
+        hooks->pull_round_improved();
+    }
 
     logger.finalize(result, tabu_sz, reset_after, adap_its,
                     adaptive.segment, last_improved,

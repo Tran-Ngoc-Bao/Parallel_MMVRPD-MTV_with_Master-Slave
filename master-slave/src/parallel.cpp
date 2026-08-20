@@ -175,17 +175,21 @@ void wait_all_pending_sends(std::list<PendingSend>& pending)
     pending.clear();
 }
 
-void send_stats(int dest, std::size_t total_evaluations, std::size_t push_count)
+void send_stats(int dest, std::size_t total_evaluations, std::size_t push_count,
+                 std::size_t pull_round_improved_count)
 {
     nlohmann::json j;
-    j["total_evaluations"] = total_evaluations;
-    j["push_count"]        = push_count;
+    j["total_evaluations"]        = total_evaluations;
+    j["push_count"]               = push_count;
+    j["pull_round_improved_count"] = pull_round_improved_count;
     send_string_impl(dest, TAG_STATS, j.dump());
 }
 
-void recv_stats(int source, std::size_t& total_evaluations, std::size_t& push_count)
+void recv_stats(int source, std::size_t& total_evaluations, std::size_t& push_count,
+                 std::size_t& pull_round_improved_count)
 {
     nlohmann::json j = nlohmann::json::parse(recv_string_impl(source, TAG_STATS));
+    pull_round_improved_count = j.at("pull_round_improved_count").get<std::size_t>();
     total_evaluations = j.at("total_evaluations").get<std::size_t>();
     push_count        = j.at("push_count").get<std::size_t>();
 }
@@ -212,18 +216,27 @@ struct ElitePool {
 
     bool consider(Solution candidate, int source_worker, cli::EliteReplaceStrategy replace_strategy)
     {
+        // TDCrowding/EdgeCrowding only -- which structural distance the crowding target is picked by.
+        auto structural_distance = [&](const Solution& a, const Solution& b) -> double {
+            return replace_strategy == cli::EliteReplaceStrategy::EdgeCrowding
+                ? static_cast<double>(a.edge_distance(b)) : a.td_distance(b);
+        };
+
         if (solutions.size() < keep_count) {
+            // Reject exact duplicates even while the pool still has room.
+            for (const auto& e : solutions) {
+                if (candidate.is_structural_duplicate(e.sol)) return false;
+            }
             solutions.push_back({std::move(candidate), source_worker, 0, next_seq++});
             return true;
         }
 
-        auto find_replacement = [&](auto eligible, auto prefer) -> std::optional<std::size_t> {
+        auto find_replacement = [&](auto prefer) -> std::optional<std::size_t> {
             std::optional<std::size_t> best;
             double best_diff = std::numeric_limits<double>::infinity();
 
             for (std::size_t i = 0; i < solutions.size(); ++i) {
-                if (!eligible(i)) continue;
-                double diff = candidate.td_distance(solutions[i].sol);
+                double diff = structural_distance(candidate, solutions[i].sol);
                 if (!best || diff < best_diff || (diff == best_diff && prefer(i, *best))) {
                     best_diff = diff;
                     best = i;
@@ -238,15 +251,20 @@ struct ElitePool {
 
         std::optional<std::size_t> chosen;
         switch (replace_strategy) {
-            case cli::EliteReplaceStrategy::SimilarityAware:
-                // Tie-break: worst cost first, then oldest.
-                chosen = find_replacement(
-                    [&](std::size_t i) { return solutions[i].sol.cost() > candidate.cost(); },
+            case cli::EliteReplaceStrategy::TDCrowding:
+            case cli::EliteReplaceStrategy::EdgeCrowding: {
+                // Replace the pool's closest match to `candidate` (tie-break:
+                // worst cost, then oldest), but only if significantly better.
+                std::optional<std::size_t> target = find_replacement(
                     [&](std::size_t i, std::size_t than) {
                         double ci = solutions[i].sol.cost(), ct = solutions[than].sol.cost();
                         return ci != ct ? ci > ct : is_older(i, than);
                     });
+                if (target && is_significantly_better(candidate.cost(), solutions[*target].sol.cost())) {
+                    chosen = target;
+                }
                 break;
+            }
 
             case cli::EliteReplaceStrategy::QualityOnly: {
                 // Replace the worst-cost entry (tie-break: oldest), if the candidate beats it.
@@ -451,6 +469,9 @@ private:
 
 std::size_t compute_elite_pool_size(const Config& cfg, int world_size)
 {
+    // Non-zero override bypasses the elite_pool_factor formula entirely.
+    if (cfg.elite_pool_size != 0) return cfg.elite_pool_size;
+
     constexpr std::size_t kMinClamp = 2;
     constexpr std::size_t kMaxClamp = 20;
 
@@ -490,6 +511,8 @@ Solution run_master(int world_size)
     // Per-worker request counts only -- offer/accept are tracked globally
     // above (that's the granularity exp2/c and exp2/d actually need).
     std::vector<std::size_t> worker_pull_request_counts_by_rank(static_cast<std::size_t>(world_size), 0);
+    std::size_t total_pull_round_improved_count = 0;
+    std::vector<std::size_t> worker_pull_round_improved_counts_by_rank(static_cast<std::size_t>(world_size), 0);
 
     const std::size_t evaluation_budget =
         base_cfg.max_evaluations * static_cast<std::size_t>(world_size - 1);
@@ -498,6 +521,7 @@ Solution run_master(int world_size)
     // Pool's own best cost (exp2/a) vs. true best solution found (exp2/d/e/f) -- can diverge under quality-only/random-target.
     std::vector<double> best_cost_by_checkpoint(9, 0.0);
     std::vector<double> best_solution_cost_by_checkpoint(9, 0.0);
+    std::vector<double> diversity_by_checkpoint(9, 0.0);
     std::vector<bool> checkpoint_captured(9, false);
 
     auto current_running_total = [&]() {
@@ -512,6 +536,7 @@ Solution run_master(int world_size)
         if (checkpoint_captured[idx] || elite_pool.empty() || !best_solution) return;
         best_cost_by_checkpoint[idx] = elite_pool.best_cost();
         best_solution_cost_by_checkpoint[idx] = best_solution->cost();
+        diversity_by_checkpoint[idx] = elite_pool.diversity();
         checkpoint_captured[idx] = true;
     };
 
@@ -637,9 +662,13 @@ Solution run_master(int world_size)
 
             std::size_t worker_evaluations = 0;
             std::size_t worker_push_count = 0;
-            recv_stats(worker_rank, worker_evaluations, worker_push_count);
+            std::size_t worker_pull_round_improved_count = 0;
+            recv_stats(worker_rank, worker_evaluations, worker_push_count, worker_pull_round_improved_count);
             total_evaluations += worker_evaluations;
             total_push_count  += worker_push_count;
+            total_pull_round_improved_count += worker_pull_round_improved_count;
+            worker_pull_round_improved_counts_by_rank[static_cast<std::size_t>(worker_rank)] =
+                worker_pull_round_improved_count;
             latest_worker_evals[static_cast<std::size_t>(worker_rank)] = worker_evaluations;
             capture_due_checkpoints();
 
@@ -672,9 +701,12 @@ Solution run_master(int world_size)
               << " (requests: " << pull_request_count << ")\n";
 
     std::vector<std::size_t> worker_pull_request_counts(static_cast<std::size_t>(world_size - 1), 0);
+    std::vector<std::size_t> worker_pull_round_improved_counts(static_cast<std::size_t>(world_size - 1), 0);
     for (int worker_rank = 1; worker_rank < world_size; ++worker_rank) {
         worker_pull_request_counts[static_cast<std::size_t>(worker_rank - 1)] =
             worker_pull_request_counts_by_rank[static_cast<std::size_t>(worker_rank)];
+        worker_pull_round_improved_counts[static_cast<std::size_t>(worker_rank - 1)] =
+            worker_pull_round_improved_counts_by_rank[static_cast<std::size_t>(worker_rank)];
     }
 
     Logger logger;
@@ -687,7 +719,9 @@ Solution run_master(int world_size)
                      pull_offer_count, pull_accept_count,
                      pull_request_count, worker_pull_request_counts,
                      pull_tolerance_satisfied_count,
-                     evaluation_budget > 0 ? best_solution_cost_by_checkpoint : std::vector<double>{});
+                     evaluation_budget > 0 ? best_solution_cost_by_checkpoint : std::vector<double>{},
+                     evaluation_budget > 0 ? diversity_by_checkpoint : std::vector<double>{},
+                     total_pull_round_improved_count, worker_pull_round_improved_counts);
     return *best_solution;
 }
 
@@ -706,6 +740,7 @@ void run_worker(int /*rank*/)
 
     std::list<PendingSend> pending_pushes;
     std::size_t push_count = 0;
+    std::size_t pull_round_improved_count = 0;
 
     Solution::EliteHooks hooks;
     hooks.push_elite = [&](const Solution& elite) {
@@ -717,6 +752,7 @@ void run_worker(int /*rank*/)
         j["evaluations"] = total_evaluations;
         send_string_impl(0, TAG_EVAL_PROGRESS, j.dump());
     };
+    hooks.pull_round_improved = [&]() { ++pull_round_improved_count; };
 
     if (worker_cfg.elite_pull_strategy != cli::ElitePullStrategy::Off) {
         hooks.pull_elite = [&](std::size_t iteration, const Solution& personal_best, Solution& pulled_elite) -> bool {
@@ -739,7 +775,7 @@ void run_worker(int /*rank*/)
     Solution result = Solution::tabu_search(root, logger, &hooks);
     wait_all_pending_sends(pending_pushes);
     send_solution(0, TAG_RESULT, result);
-    send_stats(0, logger.total_evaluations, push_count);
+    send_stats(0, logger.total_evaluations, push_count, pull_round_improved_count);
 }
 
 } // namespace parallel

@@ -4,8 +4,8 @@ Statistics for run2.sh (exp2/d, adaptive_pull_elite_segments comparison).
 
 Compares 3 adaptive_pull_elite_segments values (2, 4, 8) -- the number of
 stagnant adaptive segments before a worker pulls an elite -- all run with
-elite-pull-strategy=topk, elite-pull-accept-strategy=always,
-elite_pool_factor 0.03, and similarity-aware pool replacement. Prints 2
+elite-pull-strategy=rank, elite-pull-accept-strategy=selective,
+elite_pool_factor 0.03, and td-crowding pool replacement. Prints 2
 tables:
 
   1. final_rpd (%), irpd (%), and pull request rate (pull_request_count

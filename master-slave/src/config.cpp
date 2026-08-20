@@ -293,6 +293,7 @@ Config build_config(const cli::RunArgs& args)
     cfg.ejection_chain_iterations = args.ejection_chain_iterations;
     cfg.destroy_rate              = args.destroy_rate;
     cfg.elite_pool_factor         = args.elite_pool_factor;
+    cfg.elite_pool_size           = args.elite_pool_size;
     cfg.speed_type                = args.speed_type;
     cfg.range_type                = args.range_type;
     cfg.waiting_time_limit        = args.waiting_time_limit;
@@ -372,9 +373,10 @@ static std::string elite_push_strategy_str(cli::ElitePushStrategy s) {
 }
 static std::string elite_replace_strategy_str(cli::EliteReplaceStrategy s) {
     switch(s) {
-        case cli::EliteReplaceStrategy::SimilarityAware: return "similarity-aware";
-        case cli::EliteReplaceStrategy::QualityOnly:     return "quality-only";
-        case cli::EliteReplaceStrategy::RandomTarget:    return "random-target";
+        case cli::EliteReplaceStrategy::TDCrowding:   return "td-crowding";
+        case cli::EliteReplaceStrategy::EdgeCrowding: return "edge-crowding";
+        case cli::EliteReplaceStrategy::QualityOnly:  return "quality-only";
+        case cli::EliteReplaceStrategy::RandomTarget: return "random-target";
     }
     return "";
 }
@@ -469,6 +471,7 @@ nlohmann::json config_to_json(const Config& cfg) {
     j["ejection_chain_iterations"] = cfg.ejection_chain_iterations;
     j["destroy_rate"]              = cfg.destroy_rate;
     j["elite_pool_factor"]         = cfg.elite_pool_factor;
+    j["elite_pool_size"]           = cfg.elite_pool_size;
     j["speed_type"]                = config_type_str(cfg.speed_type);
     j["range_type"]                = config_type_str(cfg.range_type);
     j["waiting_time_limit"]        = cfg.waiting_time_limit;
@@ -630,9 +633,10 @@ Config build_config_from_json(const std::string& json_path)
         return cli::ElitePushStrategy::NewBest;
     };
     auto elite_replace_from_str = [](const std::string& s) {
+        if (s == "edge-crowding") return cli::EliteReplaceStrategy::EdgeCrowding;
         if (s == "quality-only")  return cli::EliteReplaceStrategy::QualityOnly;
         if (s == "random-target") return cli::EliteReplaceStrategy::RandomTarget;
-        return cli::EliteReplaceStrategy::SimilarityAware;
+        return cli::EliteReplaceStrategy::TDCrowding;
     };
 
     cfg.problem                   = j.at("problem").get<std::string>();
@@ -646,6 +650,7 @@ Config build_config_from_json(const std::string& json_path)
     cfg.ejection_chain_iterations = j.at("ejection_chain_iterations").get<std::size_t>();
     cfg.destroy_rate              = j.at("destroy_rate").get<double>();
     cfg.elite_pool_factor         = j.value("elite_pool_factor", 0.03);
+    cfg.elite_pool_size           = j.value("elite_pool_size", static_cast<std::size_t>(0));
     cfg.speed_type                = st_from_str(j.at("speed_type").get<std::string>());
     cfg.range_type                = st_from_str(j.at("range_type").get<std::string>());
     cfg.waiting_time_limit        = j.at("waiting_time_limit").get<double>();
@@ -680,7 +685,7 @@ Config build_config_from_json(const std::string& json_path)
     cfg.randomize_worker_adaptive_hyperparams = j.at("randomize_worker_adaptive_hyperparams").get<bool>();
     cfg.elite_replace_strategy = j.contains("elite_replace_strategy")
         ? elite_replace_from_str(j.at("elite_replace_strategy").get<std::string>())
-        : cli::EliteReplaceStrategy::SimilarityAware;
+        : cli::EliteReplaceStrategy::TDCrowding;
     cfg.compact_output            = j.at("compact_output").get<bool>();
     cfg.run_id                    = j.value("run_id", "");
     return cfg;

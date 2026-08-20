@@ -3,7 +3,7 @@
 Statistics for run2.sh (exp2/a, elite-push-strategy comparison).
 
 Compares the 3 elite-push strategies (new-best, segment-best,
-significant-best), all run with elite-pull off and similarity-aware
+significant-best), all run with elite-pull off and td-crowding
 pool replacement. For each strategy reports:
   - push rate: total_elite_pushes per 1,000,000 total_evaluations
   - reduction (%): push-rate reduction vs new-best (baseline, 0%)

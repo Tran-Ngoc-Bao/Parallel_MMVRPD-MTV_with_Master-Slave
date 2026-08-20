@@ -8,7 +8,7 @@ be, and still get accepted under Selective if it's more diverse than
 average (see pick_for_dispatch in parallel.cpp). All runs use
 elite-pull-strategy=rank, elite-pull-accept-strategy=selective (required --
 this tolerance has no effect under "always"), significant-best push
-strategy, elite_pool_factor 0.03, similarity-aware pool replacement, and
+strategy, elite_pool_factor 0.03, td-crowding pool replacement, and
 adaptive_pull_elite_segments set to the best value found in exp2/d
 (ADAPTIVE_PULL_ELITE_SEGMENTS env var in run2.sh, default 4 until exp2/d
 has been run).
