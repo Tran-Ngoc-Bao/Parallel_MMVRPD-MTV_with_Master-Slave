@@ -242,14 +242,29 @@ def main():
         vals = [r[f] for r in rows if r[f] is not None]
         return statistics.mean(vals) if vals else None
 
-    # ---- One table per pool_set (not averaged across pool_set): mean over
-    # instances of each (pool_set, strategy) pair's final_rpd/irpd/AR/ER. ----
+    # ---- One block per pool_set (not averaged across pool_set): a per-
+    # instance-per-strategy detail table, then the mean-over-instances
+    # summary table for each (pool_set, strategy) pair's final_rpd/irpd/AR/ER. ----
     pool_set_rows = []
     for pool_set in POOL_SET_NAMES:
         sizes = ",".join(f"{n}->{sz}" for n, combos_ in POOL_SETS_BY_N.items()
                           for name, sz in combos_ if name == pool_set)
         out(f"--- Pool set {pool_set} ({sizes}) ---")
-        out(f"{'Strategy':<14}{'final_RPD(%)':>14}{'irpd(%)':>10}{'AR(%)':>10}{'ER(%)':>10}")
+
+        # Detail: one row per (instance, strategy).
+        detail_header = (f"{'Instance':<12}{'Strategy':<14}{'Runs':>6}"
+                          f"{'final_RPD(%)':>14}{'irpd(%)':>10}{'AR(%)':>10}{'ER(%)':>10}")
+        out(detail_header)
+        out("-" * len(detail_header))
+        for r in summary_rows:
+            if r["pool_set"] != pool_set:
+                continue
+            out(f"{r['instance']:<12}{r['strategy']:<14}{r['runs']:>6}"
+                f"{fmt(r['final_rpd_pct'], 3):>14}{fmt(r['irpd_pct'], 3):>10}"
+                f"{fmt(r['ar_pct'], 3):>10}{fmt(r['er_pct'], 3):>10}")
+
+        # Summary: mean over instances, one row per strategy.
+        out(f"\n{'Strategy':<14}{'final_RPD(%)':>14}{'irpd(%)':>10}{'AR(%)':>10}{'ER(%)':>10}")
         out("-" * 58)
         for strategy in REPLACE_STRATEGY_LIST:
             rows = [r for r in summary_rows if r["pool_set"] == pool_set and r["strategy"] == strategy]
