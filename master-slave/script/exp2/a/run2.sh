@@ -17,10 +17,29 @@ MAX_EVALUATIONS="${5:-0}"
 
 # Fixed settings for this experiment
 ELITE_PULL_STRATEGY="off"
-ELITE_POOL_FACTOR="0.03"
 
 # Compare all 3 push strategies, RUNS runs each
 PUSH_STRATEGIES=("new-best" "segment-best" "significant-best")
+
+# ... on 3 hand-picked --elite-pool-size values, grouped into named "sets"
+# (po1..po3), same as exp2/g. Each set fixes a pool size per customer count:
+#   po1: 200->2, 500->3
+#   po2: 200->3, 500->4
+#   po3: 200->4, 500->5
+case "${DATA_PREFIX}" in
+    200)
+        POOL_SET_NAMES=("po1" "po2" "po3")
+        POOL_SIZES=("2"   "3"   "4")
+        ;;
+    500)
+        POOL_SET_NAMES=("po1" "po2" "po3")
+        POOL_SIZES=("3"   "4"   "5")
+        ;;
+    *)
+        echo "No elite_pool_size sets configured for DATA_PREFIX=${DATA_PREFIX}" >&2
+        exit 1
+        ;;
+esac
 
 DATA_DIR="${SCRIPT_DIR}/../../../../data"
 DATA_FILES=()
@@ -41,23 +60,29 @@ mkdir -p "${OUTPUT_DIR}"
 
 for DATA_FILE in "${DATA_FILES[@]}"; do
     DATA_FILE_NAME="$(basename "${DATA_FILE}" .txt)"
-    for PUSH_STRATEGY in "${PUSH_STRATEGIES[@]}"; do
-        for ((x = 1; x <= RUNS; x++)); do
-            RUN_ID="${PUSH_STRATEGY}-${x}"
-            OUT_FILE="${OUTPUT_DIR}/${DATA_FILE_NAME}-${RUN_ID}.json"
-            if [ -f "${OUT_FILE}" ]; then
-                echo "=== ${DATA_FILE_NAME} push=${PUSH_STRATEGY} run ${x}/${RUNS}: already have ${OUT_FILE}, skipping ==="
-                continue
-            fi
-            SEED=$(( x * 100 ))
-            echo "=== ${DATA_FILE_NAME} push=${PUSH_STRATEGY} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
-            NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
-                ELITE_PULL_STRATEGY="${ELITE_PULL_STRATEGY}" \
-                ELITE_PUSH_STRATEGY="${PUSH_STRATEGY}" \
-                OUTPUTS_DIR="${OUTPUT_DIR}" \
-                RUN_ID="${RUN_ID}" \
-                bash "${RUN_SCRIPT}" "${DATA_FILE}"
-            sleep "${SLEEP_SEC}"
+    for ((p = 0; p < ${#POOL_SET_NAMES[@]}; p++)); do
+        POOL_SET_NAME="${POOL_SET_NAMES[$p]}"
+        POOL_SIZE="${POOL_SIZES[$p]}"
+
+        for PUSH_STRATEGY in "${PUSH_STRATEGIES[@]}"; do
+            for ((x = 1; x <= RUNS; x++)); do
+                RUN_ID="${POOL_SET_NAME}-${PUSH_STRATEGY}-${x}"
+                OUT_FILE="${OUTPUT_DIR}/${DATA_FILE_NAME}-${RUN_ID}.json"
+                if [ -f "${OUT_FILE}" ]; then
+                    echo "=== ${DATA_FILE_NAME} ${POOL_SET_NAME} (pool_size=${POOL_SIZE}) push=${PUSH_STRATEGY} run ${x}/${RUNS}: already have ${OUT_FILE}, skipping ==="
+                    continue
+                fi
+                SEED=$(( x * 100 ))
+                echo "=== ${DATA_FILE_NAME} ${POOL_SET_NAME} (pool_size=${POOL_SIZE}) push=${PUSH_STRATEGY} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
+                NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
+                    ELITE_PULL_STRATEGY="${ELITE_PULL_STRATEGY}" \
+                    ELITE_PUSH_STRATEGY="${PUSH_STRATEGY}" \
+                    ELITE_POOL_SIZE="${POOL_SIZE}" \
+                    OUTPUTS_DIR="${OUTPUT_DIR}" \
+                    RUN_ID="${RUN_ID}" \
+                    bash "${RUN_SCRIPT}" "${DATA_FILE}"
+                sleep "${SLEEP_SEC}"
+            done
         done
     done
 done

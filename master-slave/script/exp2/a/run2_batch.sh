@@ -5,7 +5,6 @@ export LC_NUMERIC=C
 JOBS=(
     "200   194000000"
     "500   2758000000"
-    "1000  12000000000"
 )
 
 # Usage:
@@ -15,7 +14,7 @@ JOBS=(
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN2_SCRIPT="${SCRIPT_DIR}/run2.sh"
 
-RUNS="${1:-3}"
+RUNS="${1:-5}"
 SLEEP_SEC="${SLEEP_SEC:-0.0}"
 NUM_WORKERS="${2:-7}"
 

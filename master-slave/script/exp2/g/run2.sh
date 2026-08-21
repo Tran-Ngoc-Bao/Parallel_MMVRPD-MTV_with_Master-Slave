@@ -17,7 +17,6 @@ MAX_EVALUATIONS="${5:-0}"
 
 # Fixed settings for this experiment
 ADAPTIVE_PULL_ELITE_SEGMENTS="4"
-ELITE_PULL_QUALITY_TOLERANCE_PCT="-1.0"
 
 # Compare 3 elite_replace_strategy values, RUNS runs each.
 REPLACE_STRATEGY_LIST=("quality-only" "td-crowding" "edge-crowding")

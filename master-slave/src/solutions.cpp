@@ -386,22 +386,16 @@ size_t Solution::edge_distance(const Solution& other) const {
         for (const auto& truck_vehicle : sol.truck_routes) {
             for (const auto& route : truck_vehicle) {
                 const auto& customers = route->data().customers;
-                if (customers.size() < 2) continue;
-                for (std::size_t i = 0; i < customers.size(); ++i) {
-                    std::size_t u = customers[i];
-                    std::size_t v = customers[(i + 1) % customers.size()];
-                    out[pack_edge(u, v)] += 1;
+                for (std::size_t i = 0; i + 1 < customers.size(); ++i) {
+                    out[pack_edge(customers[i], customers[i + 1])] += 1;
                 }
             }
         }
         for (const auto& drone_vehicle : sol.drone_routes) {
             for (const auto& route : drone_vehicle) {
                 const auto& customers = route->data().customers;
-                if (customers.size() < 2) continue;
-                for (std::size_t i = 0; i < customers.size(); ++i) {
-                    std::size_t u = customers[i];
-                    std::size_t v = customers[(i + 1) % customers.size()];
-                    out[pack_edge(u, v)] += 1;
+                for (std::size_t i = 0; i + 1 < customers.size(); ++i) {
+                    out[pack_edge(customers[i], customers[i + 1])] += 1;
                 }
             }
         }
