@@ -14,7 +14,7 @@ JOBS=(
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN2_SCRIPT="${SCRIPT_DIR}/run2.sh"
 
-RUNS="${1:-5}"
+RUNS="${1:-10}"
 SLEEP_SEC="${SLEEP_SEC:-0.0}"
 NUM_WORKERS="${2:-7}"
 

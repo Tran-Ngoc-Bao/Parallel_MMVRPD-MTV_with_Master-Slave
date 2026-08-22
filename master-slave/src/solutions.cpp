@@ -1064,9 +1064,9 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                         if (elite_set.size() == cfg.max_elite_size) {
                             // Remove least diverse
                             size_t min_idx = 0;
-                            double min_hd  = elite_set[0].td_distance(result);
+                            double min_hd  = static_cast<double>(elite_set[0].edge_distance(result));
                             for (size_t i = 1; i < elite_set.size(); ++i) {
-                                double hd = elite_set[i].td_distance(result);
+                                double hd = static_cast<double>(elite_set[i].edge_distance(result));
                                 if (hd < min_hd) { min_hd = hd; min_idx = i; }
                             }
                             swap_remove_elem(elite_set, min_idx);

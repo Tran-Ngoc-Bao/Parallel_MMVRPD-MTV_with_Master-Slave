@@ -17,11 +17,20 @@ MAX_EVALUATIONS="${5:-0}"
 
 # Fixed settings for this experiment
 ADAPTIVE_PULL_ELITE_SEGMENTS="4"
-ELITE_POOL_FACTOR="0.03"
 
 # Compare 4 elite-pull strategies (excluding off) x 2 elite-pull-accept strategies, RUNS runs each
 PULL_STRATEGIES=("random" "topk" "rank" "pullcount")
 ACCEPT_STRATEGIES=("always" "selective")
+
+# Fixed --elite-pool-size, same as exp2/g's po3 (200->4, 500->5).
+case "${DATA_PREFIX}" in
+    200) POOL_SIZE="4" ;;
+    500) POOL_SIZE="5" ;;
+    *)
+        echo "No elite_pool_size configured for DATA_PREFIX=${DATA_PREFIX}" >&2
+        exit 1
+        ;;
+esac
 
 DATA_DIR="${SCRIPT_DIR}/../../../../data"
 DATA_FILES=()
@@ -57,7 +66,7 @@ for DATA_FILE in "${DATA_FILES[@]}"; do
                     ADAPTIVE_PULL_ELITE_SEGMENTS="${ADAPTIVE_PULL_ELITE_SEGMENTS}" \
                     ELITE_PULL_STRATEGY="${PULL_STRATEGY}" \
                     ELITE_PULL_ACCEPT_STRATEGY="${ACCEPT_STRATEGY}" \
-                    ELITE_POOL_FACTOR="${ELITE_POOL_FACTOR}" \
+                    ELITE_POOL_SIZE="${POOL_SIZE}" \
                     OUTPUTS_DIR="${OUTPUT_DIR}" \
                     RUN_ID="${RUN_ID}" \
                     bash "${RUN_SCRIPT}" "${DATA_FILE}"

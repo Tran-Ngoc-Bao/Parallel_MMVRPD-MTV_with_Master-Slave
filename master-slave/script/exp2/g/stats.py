@@ -49,6 +49,19 @@ weights each pull attempt equally instead of each run equally. These
 per-instance numbers are then averaged over instances to get each
 (pool_set, strategy) pair's final numbers.
 
+Also writes a separate stats-sub.txt with 3 end-of-run pool-state numbers
+per (pool_set, strategy) pair (same per-pool_set block layout, same
+stratified run -> instance -> pair aggregation as final_rpd/irpd above):
+  - mean_pool_rpd (%): RPD of the mean(elite_pool_costs) held at program
+    end vs BKS working_time (same style as exp2/b's pool RPD)
+  - pool_diversity: elite_pool_diversity held at program end (mean pairwise
+    td_distance across the final pool, normalized to [0,1])
+  - replacement rate: accepted_elite_pushes per 1,000,000 total_evaluations
+    -- accepted_elite_pushes counts every push that actually got inserted
+    into or replaced a slot in the pool (see ElitePool::consider in
+    parallel.cpp); with these pool sizes (2-5) the pool fills almost
+    immediately, so this is effectively a replacement rate
+
 Looks for run files at
 <outputs>/<n>/<n>.<combo>-<pool_set>-<strategy>-<run_id>.json (the naming
 used by run2.sh) and BKS files at <bks>/<n>/<n>.<combo>-bks.json.
@@ -132,6 +145,7 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
             rpds, irpds_per_run = [], []
             accepted_pulls, offered_pulls = [], []
             improved_rounds = []
+            pool_rpds, pool_diversities, replacement_rates = [], [], []
             for run_id, path in run_files:
                 data = load_run(path)
                 final_cost = data["solution"]["working_time"]
@@ -144,6 +158,15 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
                 run_ar = pac / poc * 100.0 if poc else None
                 run_er = pri / pac * 100.0 if pac else None
 
+                pool_costs = data.get("elite_pool_costs")
+                pool_mean_cost = statistics.mean(pool_costs) if pool_costs else None
+                run_pool_rpd = rpd_pct(pool_mean_cost, bks_value)
+                run_pool_diversity = data.get("elite_pool_diversity")
+                accepted_pushes = data.get("accepted_elite_pushes")
+                total_evals = data.get("total_evaluations")
+                run_replacement_rate = (
+                    accepted_pushes / total_evals * 1e6 if total_evals else None)
+
                 if run_rpd is not None:
                     rpds.append(run_rpd)
                 if cps is not None and len(cps) == NUM_CHECKPOINTS:
@@ -152,6 +175,12 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
                 accepted_pulls.append(pac)
                 offered_pulls.append(poc)
                 improved_rounds.append(pri)
+                if run_pool_rpd is not None:
+                    pool_rpds.append(run_pool_rpd)
+                if run_pool_diversity is not None:
+                    pool_diversities.append(run_pool_diversity)
+                if run_replacement_rate is not None:
+                    replacement_rates.append(run_replacement_rate)
 
                 detail_rows.append({
                     "n": n, "instance": instance, "pool_set": pool_set, "pool_size": pool_size,
@@ -159,6 +188,8 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
                     "final_cost": final_cost, "final_rpd_pct": run_rpd,
                     "pull_accept_count": pac, "pull_offer_count": poc, "ar_pct": run_ar,
                     "pull_round_improved_count": pri, "er_pct": run_er,
+                    "pool_rpd_pct": run_pool_rpd, "pool_diversity": run_pool_diversity,
+                    "replacement_rate_per_million_evals": run_replacement_rate,
                 })
 
             total_poc = sum(offered_pulls)
@@ -174,6 +205,9 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
                 "irpd_pct": mean_or_none(irpds_per_run),
                 "ar_pct": ar_pct,
                 "er_pct": er_pct,
+                "mean_pool_rpd_pct": mean_or_none(pool_rpds),
+                "pool_diversity": mean_or_none(pool_diversities),
+                "replacement_rate_per_million_evals": mean_or_none(replacement_rates),
             })
     return summary_rows, detail_rows
 
@@ -287,6 +321,57 @@ def main():
     report = "\n".join(lines)
     print(report)
 
+    # ---- stats-sub.txt: end-of-run pool-state numbers (mean_pool_rpd,
+    # pool_diversity, replacement rate), same per-pool_set block layout. ----
+    sub_lines = []
+
+    def sub_out(s=""):
+        sub_lines.append(s)
+
+    sub_out(f"outputs: {outputs_dir}")
+    sub_out(f"bks:     {bks_dir}")
+    sub_out()
+
+    pool_set_sub_rows = []
+    for pool_set in POOL_SET_NAMES:
+        sizes = ",".join(f"{n}->{sz}" for n, combos_ in POOL_SETS_BY_N.items()
+                          for name, sz in combos_ if name == pool_set)
+        sub_out(f"--- Pool set {pool_set} ({sizes}) ---")
+
+        detail_header = (f"{'Instance':<12}{'Strategy':<14}{'Runs':>6}"
+                          f"{'MeanPoolRPD(%)':>16}{'PoolDiv':>10}{'ReplRate':>12}")
+        sub_out(detail_header)
+        sub_out("-" * len(detail_header))
+        for r in summary_rows:
+            if r["pool_set"] != pool_set:
+                continue
+            sub_out(f"{r['instance']:<12}{r['strategy']:<14}{r['runs']:>6}"
+                    f"{fmt(r['mean_pool_rpd_pct'], 3):>16}{fmt(r['pool_diversity'], 3):>10}"
+                    f"{fmt(r['replacement_rate_per_million_evals'], 3):>12}")
+
+        sub_out(f"\n{'Strategy':<14}{'MeanPoolRPD(%)':>16}{'PoolDiv':>10}{'ReplRate':>12}")
+        sub_out("-" * 52)
+        for strategy in REPLACE_STRATEGY_LIST:
+            rows = [r for r in summary_rows if r["pool_set"] == pool_set and r["strategy"] == strategy]
+            row = {
+                "pool_set": pool_set,
+                "strategy": strategy,
+                "mean_pool_rpd_pct": avg_field(rows, "mean_pool_rpd_pct"),
+                "pool_diversity": avg_field(rows, "pool_diversity"),
+                "replacement_rate_per_million_evals": avg_field(rows, "replacement_rate_per_million_evals"),
+            }
+            pool_set_sub_rows.append(row)
+            sub_out(f"{strategy:<14}{fmt(row['mean_pool_rpd_pct'], 3):>16}"
+                    f"{fmt(row['pool_diversity'], 3):>10}"
+                    f"{fmt(row['replacement_rate_per_million_evals'], 3):>12}")
+        sub_out()
+
+    if incomplete:
+        sub_out(f"Note: fewer runs found than expected for: {', '.join(incomplete)}")
+
+    sub_report = "\n".join(sub_lines)
+    print(sub_report)
+
     if args.no_save:
         return
 
@@ -307,6 +392,13 @@ def main():
         pool_set_path = outputs_dir / "pool_set_summary.csv"
         write_csv(pool_set_path, pool_set_rows)
         saved.append(pool_set_path)
+    sub_report_path = outputs_dir / "stats-sub.txt"
+    sub_report_path.write_text(sub_report + "\n")
+    saved.append(sub_report_path)
+    if pool_set_sub_rows:
+        pool_set_sub_path = outputs_dir / "pool_set_sub_summary.csv"
+        write_csv(pool_set_sub_path, pool_set_sub_rows)
+        saved.append(pool_set_sub_path)
 
     print("\nSaved:")
     for p in saved:

@@ -5,8 +5,9 @@ strategy comparison).
 
 Compares 4 elite-pull strategies (random, topk, rank, pullcount), each run
 with both elite-pull-accept strategies (always, selective), all with
-significant-best push strategy, elite_pool_factor 0.03, and
-similarity-quality pool replacement. For each pull strategy reports:
+significant-best push strategy, a fixed --elite-pool-size (same as
+exp2/g's po3: 200->4, 500->5), and similarity-quality pool replacement.
+For each pull strategy reports:
   - always RPD (%): RPD of the final best cost (solution.working_time) vs
     BKS working_time, under the "always" accept strategy
   - selective RPD (%): same, under the "selective" accept strategy

@@ -197,7 +197,21 @@ void recv_stats(int source, std::size_t& total_evaluations, std::size_t& push_co
 // Cost comparison tolerance for floating-point solution costs.
 static bool is_significantly_better(double fx, double fe)
 {
-    return fx < fe - 1e-9 * std::max(1.0, std::abs(fe));
+    return fx < fe - 1e-9 * std::max(1.0, fe);
+}
+
+// Total edge count of a solution (sum of customers.size()-1 over every
+// route) -- denominator to normalize edge_distance to [0,1].
+static std::size_t total_edges(const Solution& sol)
+{
+    std::size_t total = 0;
+    for (const auto& tv : sol.truck_routes) for (const auto& route : tv) {
+        total += route->data().customers.size() - 1;
+    }
+    for (const auto& dv : sol.drone_routes) for (const auto& route : dv) {
+        total += route->data().customers.size() - 1;
+    }
+    return total;
 }
 
 // offered: true iff at least one elite from a worker other than the
@@ -321,9 +335,11 @@ struct ElitePool {
         return result;
     }
 
-    // Average pairwise structural (td) distance across all elites currently
-    // in the pool: div = 2/(m*(m-1)) * sum over all C(m,2) pairs. td_distance
-    // is already normalized to [0,1], so no extra scaling is needed here.
+    // Average pairwise edge distance across all elites currently in the
+    // pool, normalized to [0,1] per pair via edge_distance is asymmetric,
+    // so both directions are summed and divided by both totals:
+    // (ed(a,b)+ed(b,a)) / (total_edges(a)+total_edges(b)).
+    // div = 2/(m*(m-1)) * sum over all C(m,2) pairs.
     double diversity() const
     {
         const std::size_t m = solutions.size();
@@ -332,7 +348,13 @@ struct ElitePool {
         double sum = 0.0;
         for (std::size_t i = 0; i < m; ++i) {
             for (std::size_t j = i + 1; j < m; ++j) {
-                sum += solutions[i].sol.td_distance(solutions[j].sol);
+                const Solution& a = solutions[i].sol;
+                const Solution& b = solutions[j].sol;
+                const std::size_t te = total_edges(a) + total_edges(b);
+                if (te > 0) {
+                    sum += static_cast<double>(a.edge_distance(b) + b.edge_distance(a))
+                         / static_cast<double>(te);
+                }
             }
         }
         return 2.0 * sum
@@ -439,13 +461,13 @@ struct ElitePool {
         std::vector<double> d_values;
         d_values.reserve(candidates.size());
         for (std::size_t idx : candidates) {
-            const double d = solutions[idx].sol.td_distance(*requester_personal_best);
+            const double d = static_cast<double>(solutions[idx].sol.edge_distance(*requester_personal_best));
             if (d > 0.0) d_values.push_back(d);
         }
         if (!d_values.empty()) {
             const double mean_d = std::accumulate(d_values.begin(), d_values.end(), 0.0)
                                  / static_cast<double>(d_values.size());
-            const double d_e = picked->td_distance(*requester_personal_best);
+            const double d_e = static_cast<double>(picked->edge_distance(*requester_personal_best));
             if (d_e > mean_d) {
                 return {true, picked, true};
             }

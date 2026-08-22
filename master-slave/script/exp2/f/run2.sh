@@ -17,10 +17,19 @@ MAX_EVALUATIONS="${5:-0}"
 
 # Fixed settings for this experiment
 ADAPTIVE_PULL_ELITE_SEGMENTS="4"
-ELITE_POOL_FACTOR="0.03"
 
 # Compare 4 elite_replace_strategy values, RUNS runs each.
 REPLACE_STRATEGY_LIST=("td-crowding" "edge-crowding" "quality-only" "random-target")
+
+# Fixed --elite-pool-size, same as exp2/g's po3 (200->4, 500->5).
+case "${DATA_PREFIX}" in
+    200) POOL_SIZE="4" ;;
+    500) POOL_SIZE="5" ;;
+    *)
+        echo "No elite_pool_size configured for DATA_PREFIX=${DATA_PREFIX}" >&2
+        exit 1
+        ;;
+esac
 
 DATA_DIR="${SCRIPT_DIR}/../../../../data"
 DATA_FILES=()
@@ -53,7 +62,8 @@ for DATA_FILE in "${DATA_FILES[@]}"; do
             echo "=== ${DATA_FILE_NAME} replace=${REPLACE_STRATEGY} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
             NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
                 ADAPTIVE_PULL_ELITE_SEGMENTS="${ADAPTIVE_PULL_ELITE_SEGMENTS}" \
-                ELITE_POOL_FACTOR="${ELITE_POOL_FACTOR}" \
+                ELITE_POOL_SIZE="${POOL_SIZE}" \
+                ELITE_REPLACE_STRATEGY="${REPLACE_STRATEGY}" \
                 OUTPUTS_DIR="${OUTPUT_DIR}" \
                 RUN_ID="${RUN_ID}" \
                 bash "${RUN_SCRIPT}" "${DATA_FILE}"

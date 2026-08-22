@@ -12,8 +12,9 @@ only in the distance used: td_distance vs edge_distance (Solution::
 edge_distance / td_distance in solutions.cpp). All runs use
 elite-pull-strategy=rank,
 elite-pull-accept-strategy=selective, significant-best push strategy,
-elite_pool_factor 0.03, adaptive_pull_elite_segments set to the best
-value found in exp2/d, and elite_pull_quality_tolerance_pct set to the
+a fixed --elite-pool-size (same as exp2/g's po3: 200->4, 500->5),
+adaptive_pull_elite_segments set to the best value found in exp2/d, and
+elite_pull_quality_tolerance_pct set to the
 best value found in exp2/e (both overridable via env var in run2.sh,
 defaults 8 and 1 respectively until those experiments have concluded).
 Reports 3 numbers per replace-strategy value:
