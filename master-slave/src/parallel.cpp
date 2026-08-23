@@ -439,13 +439,13 @@ struct ElitePool {
         std::vector<double> d_values;
         d_values.reserve(candidates.size());
         for (std::size_t idx : candidates) {
-            const double d = solutions[idx].sol.td_distance(*requester_personal_best);
+            const double d = static_cast<double>(requester_personal_best->edge_distance(solutions[idx].sol));
             if (d > 0.0) d_values.push_back(d);
         }
         if (!d_values.empty()) {
             const double mean_d = std::accumulate(d_values.begin(), d_values.end(), 0.0)
                                  / static_cast<double>(d_values.size());
-            const double d_e = picked->td_distance(*requester_personal_best);
+            const double d_e = static_cast<double>(requester_personal_best->edge_distance(*picked));
             if (d_e > mean_d) {
                 return {true, picked, true};
             }

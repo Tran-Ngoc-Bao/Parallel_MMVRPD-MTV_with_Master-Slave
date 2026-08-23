@@ -17,9 +17,8 @@ pool replacement. Prints 3 tables:
      final_rpd and the request rate use the same stratified average:
      computed per run first (each involves a division, so the ratio is
      taken per run, not from runs summed/averaged together) -> mean over
-     that instance's runs -> mean over instances (6 by default: the 2
-     customer counts x 2 combos grid, plus the 2 extra instances in
-     EXTRA_INSTANCES: 200.20.3, 500.30.4). irpd is computed the same way
+     that instance's runs -> mean over instances (4 by default: 2
+     customer counts x 2 combos). irpd is computed the same way
      as exp2/a: trapezoidal-rule average of R0..R8 (RPD (%) of
      best_solution_cost_by_evaluation_checkpoint at 0/8..8/8 of the
      evaluation budget vs BKS working_time), (1/8) * [(R0+R8)/2 +
@@ -60,11 +59,6 @@ from pathlib import Path
 
 SEGMENTS_LIST = ["2", "4", "8"]
 NUM_CHECKPOINTS = 9  # R0..R8, at k/8 of the evaluation budget
-
-# Extra (n, combo) instances run in addition to the customers x combos grid
-# below -- run2.sh runs these two on top of the regular grid for their
-# matching customer count (see the COMBOS case in run2.sh).
-EXTRA_INSTANCES = [("200", "20.3"), ("500", "30.4")]
 
 
 def load_run(path: Path):
@@ -219,9 +213,6 @@ def main():
     out()
 
     instance_pairs = [(n, combo) for n in customers for combo in combos]
-    for extra in EXTRA_INSTANCES:
-        if extra not in instance_pairs:
-            instance_pairs.append(extra)
 
     summary_rows = []
     detail_rows = []

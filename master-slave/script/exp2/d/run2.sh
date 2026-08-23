@@ -21,8 +21,8 @@ SEGMENTS_LIST=("2" "4" "8")
 COMBOS=("10.2" "40.1")
 # Fixed --elite-pool-size, same as exp2/g's po3 (200->4, 500->5).
 case "${DATA_PREFIX}" in
-    200) COMBOS+=("20.3"); POOL_SIZE="4" ;;
-    500) COMBOS+=("30.4"); POOL_SIZE="5" ;;
+    200) POOL_SIZE="4" ;;
+    500) POOL_SIZE="5" ;;
     *)
         echo "No elite_pool_size configured for DATA_PREFIX=${DATA_PREFIX}" >&2
         exit 1

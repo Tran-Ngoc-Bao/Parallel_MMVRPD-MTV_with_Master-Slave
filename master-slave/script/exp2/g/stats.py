@@ -78,7 +78,7 @@ import re
 import statistics
 from pathlib import Path
 
-REPLACE_STRATEGY_LIST = ["quality-only", "td-crowding", "edge-crowding"]
+REPLACE_STRATEGY_LIST = ["quality-only", "td-crowding", "edge-crowding", "random-target"]
 POOL_SETS_BY_N = {
     "200": [("po1", "2"), ("po2", "3"), ("po3", "4")],
     "500": [("po1", "3"), ("po2", "4"), ("po3", "5")],

@@ -7,21 +7,26 @@ Instance    Strategy        Runs  final_RPD(%)   irpd(%)     AR(%)     ER(%)
 200.10.2    quality-only      10        -0.453     1.860    51.724    81.667
 200.10.2    td-crowding       10        -0.610     1.853    46.585    88.346
 200.10.2    edge-crowding     10        -0.529     1.821    46.491    81.509
+200.10.2    random-target     10        -0.318     1.890    51.890    84.106
 200.40.1    quality-only      10        -0.485     3.099    51.975    85.600
 200.40.1    td-crowding       10        -0.499     3.152    55.889    81.226
 200.40.1    edge-crowding     10        -0.550     3.078    50.317    81.092
+200.40.1    random-target     10        -0.564     3.075    50.932    84.959
 500.10.2    quality-only      10        -1.002     0.801    64.655    78.095
 500.10.2    td-crowding       10        -0.947     0.787    48.741    81.395
 500.10.2    edge-crowding     10        -1.015     0.806    52.399    77.465
+500.10.2    random-target     10        -0.885     0.791    59.012    79.498
 500.40.1    quality-only      10        -0.464     4.860    67.568    83.385
 500.40.1    td-crowding       10        -0.302     5.021    62.340    78.498
 500.40.1    edge-crowding     10        -0.310     5.016    65.458    74.267
+500.40.1    random-target     10        -0.406     4.894    69.296    77.846
 
 Strategy        final_RPD(%)   irpd(%)     AR(%)     ER(%)
 ----------------------------------------------------------
 quality-only          -0.601     2.655    58.980    82.187
 td-crowding           -0.589     2.703    53.389    82.366
 edge-crowding         -0.601     2.680    53.666    78.583
+random-target         -0.543     2.663    57.783    81.602
 
 --- Pool set po2 (200->3,500->4) ---
 Instance    Strategy        Runs  final_RPD(%)   irpd(%)     AR(%)     ER(%)
@@ -29,21 +34,26 @@ Instance    Strategy        Runs  final_RPD(%)   irpd(%)     AR(%)     ER(%)
 200.10.2    quality-only      10        -0.362     1.847    61.888    72.599
 200.10.2    td-crowding       10        -0.313     1.864    40.909    85.470
 200.10.2    edge-crowding     10        -0.392     1.876    42.133    77.593
+200.10.2    random-target     10        -0.474     1.860    62.544    77.437
 200.40.1    quality-only      10        -0.671     3.062    70.124    86.095
 200.40.1    td-crowding       10        -0.460     3.144    58.071    61.011
 200.40.1    edge-crowding     10        -0.558     3.084    58.910    65.836
+200.40.1    random-target     10        -0.493     3.152    56.549    83.824
 500.10.2    quality-only      10        -0.558     0.952    60.146    75.758
 500.10.2    td-crowding       10        -0.987     0.769    48.914    84.595
 500.10.2    edge-crowding     10        -0.872     0.804    48.941    73.537
+500.10.2    random-target     10        -0.965     0.777    61.845    82.056
 500.40.1    quality-only      10        -0.592     4.803    71.642    81.250
 500.40.1    td-crowding       10        -0.423     4.977    57.419    72.659
 500.40.1    edge-crowding     10        -0.258     5.015    58.737    68.459
+500.40.1    random-target     10        -0.452     4.878    67.462    81.672
 
 Strategy        final_RPD(%)   irpd(%)     AR(%)     ER(%)
 ----------------------------------------------------------
 quality-only          -0.546     2.666    65.950    78.925
 td-crowding           -0.546     2.688    51.329    75.934
 edge-crowding         -0.520     2.695    52.180    71.356
+random-target         -0.596     2.667    62.100    81.247
 
 --- Pool set po3 (200->4,500->5) ---
 Instance    Strategy        Runs  final_RPD(%)   irpd(%)     AR(%)     ER(%)
@@ -51,19 +61,25 @@ Instance    Strategy        Runs  final_RPD(%)   irpd(%)     AR(%)     ER(%)
 200.10.2    quality-only      10        -0.308     1.865    60.938    73.219
 200.10.2    td-crowding       10        -0.295     1.942    44.974    80.000
 200.10.2    edge-crowding     10        -0.637     1.834    44.268    79.283
+200.10.2    random-target     10        -0.306     1.922    51.568    70.270
 200.40.1    quality-only      10        -0.472     3.071    55.509    70.787
 200.40.1    td-crowding       10        -0.453     3.143    58.774    64.388
 200.40.1    edge-crowding     10        -0.508     3.125    63.636    62.126
+200.40.1    random-target     10        -0.450     3.094    52.807    77.953
 500.10.2    quality-only      10        -0.823     0.799    61.934    75.889
 500.10.2    td-crowding       10        -1.020     0.680    44.600    76.923
 500.10.2    edge-crowding     10        -1.058     0.703    46.538    76.860
+500.10.2    random-target     10        -0.810     0.818    62.095    76.908
 500.40.1    quality-only      10        -0.427     4.907    71.616    83.841
 500.40.1    td-crowding       10        -0.398     4.988    51.572    71.138
 500.40.1    edge-crowding     10        -0.315     4.994    51.368    72.541
+500.40.1    random-target      0             -         -         -         -
 
 Strategy        final_RPD(%)   irpd(%)     AR(%)     ER(%)
 ----------------------------------------------------------
 quality-only          -0.507     2.660    62.499    75.934
 td-crowding           -0.542     2.688    49.980    73.112
 edge-crowding         -0.629     2.664    51.453    72.702
+random-target         -0.522     1.945    55.490    75.044
 
+Note: fewer runs found than expected for: 500.40.1/po3/random-target (0/3)
