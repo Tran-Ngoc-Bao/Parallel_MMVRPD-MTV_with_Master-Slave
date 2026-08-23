@@ -6,9 +6,13 @@ Compares 3 adaptive_pull_elite_segments values (2, 4, 8) -- the number of
 stagnant adaptive segments before a worker pulls an elite -- all run with
 elite-pull-strategy=rank, elite-pull-accept-strategy=selective, a fixed
 --elite-pool-size (same as exp2/g's po3: 200->4, 500->5), and td-crowding
-pool replacement. Prints 2 tables:
+pool replacement. Prints 3 tables:
 
-  1. final_rpd (%), irpd (%), and pull request rate (pull_request_count
+  1. Per-instance-per-segments detail: final_rpd (%), irpd (%), and pull
+     request rate, one row per (instance, segments value), each averaged
+     per run first -> mean over that instance's runs, same as below but
+     not yet averaged over instances.
+  2. final_rpd (%), irpd (%), and pull request rate (pull_request_count
      per 1,000,000 total_evaluations), one row per segments value.
      final_rpd and the request rate use the same stratified average:
      computed per run first (each involves a division, so the ratio is
@@ -21,7 +25,7 @@ pool replacement. Prints 2 tables:
      evaluation budget vs BKS working_time), (1/8) * [(R0+R8)/2 +
      R1+...+R7], with R0..R8 themselves averaged per run first, then over
      instances, same as final_rpd.
-  2. pull_request_count per worker, one row per worker, one column per
+  3. pull_request_count per worker, one row per worker, one column per
      segments value. Each cell is a plain count (no division), averaged the
      same stratified way: per-worker count per run -> mean over runs for
      that instance -> mean over instances.
@@ -235,10 +239,22 @@ def main():
         vals = [r[f] for r in rows if r[f] is not None]
         return statistics.mean(vals) if vals else None
 
+    # ---- Per-instance-per-segments detail ----
+    detail_header = (f"{'Instance':<12}{'Segments':<10}{'Runs':>6}"
+                      f"{'final_RPD(%)':>14}{'irpd(%)':>10}{'Request/1M evals':>18}")
+    out(detail_header)
+    out("-" * len(detail_header))
+    for r in summary_rows:
+        out(f"{r['instance']:<12}{r['segments']:<10}{r['runs']:>6}"
+            f"{fmt(r['final_rpd_pct'], 3):>14}{fmt(r['irpd_pct'], 3):>10}"
+            f"{fmt(r['pull_request_rate_per_million_evals'], 3):>18}")
+    if incomplete:
+        out(f"\nNote: fewer runs found than expected for: {', '.join(incomplete)}")
+
     # ---- Table 1: final_rpd (%), irpd (%), and pull request rate per segments value ----
     # Stratified average: per run -> mean over runs (per instance, done in
     # compute_instance) -> mean over instances (here).
-    out(f"{'Segments':<10}{'final_RPD(%)':>14}{'irpd(%)':>10}{'Request/1M evals':>18}")
+    out(f"\n{'Segments':<10}{'final_RPD(%)':>14}{'irpd(%)':>10}{'Request/1M evals':>18}")
     out("-" * 52)
     segments_rows = []
     for segments in SEGMENTS_LIST:
@@ -253,8 +269,6 @@ def main():
         out(f"{segments:<10}{fmt(segments_row['final_rpd_pct'], 3):>14}"
             f"{fmt(segments_row['irpd_pct'], 3):>10}"
             f"{fmt(segments_row['pull_request_rate_per_million_evals'], 3):>18}")
-    if incomplete:
-        out(f"\nNote: fewer runs found than expected for: {', '.join(incomplete)}")
 
     # ---- Table 2: pull_request_count per worker, columns = segments value ----
     # Stratified average: per-worker count per run -> mean over runs for

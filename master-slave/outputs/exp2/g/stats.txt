@@ -1,5 +1,5 @@
-outputs: /Users/bao/Documents/github/Parallel_MMVRPD-MTV_with_Master-Slave/master-slave/outputs/exp2/g
-bks:     /Users/bao/Documents/github/Parallel_MMVRPD-MTV_with_Master-Slave/bks
+outputs: /home/bao/Documents/github/Parallel_MMVRPD-MTV_with_Master-Slave/master-slave/outputs/exp2/g
+bks:     /home/bao/Documents/github/Parallel_MMVRPD-MTV_with_Master-Slave/bks
 
 --- Pool set po1 (200->2,500->3) ---
 Instance    Strategy        Runs  final_RPD(%)   irpd(%)     AR(%)     ER(%)

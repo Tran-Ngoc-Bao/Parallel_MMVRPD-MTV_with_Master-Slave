@@ -18,8 +18,8 @@ MAX_EVALUATIONS="${5:-0}"
 # Fixed settings for this experiment
 ADAPTIVE_PULL_ELITE_SEGMENTS="4"
 
-# Compare 3 elite_replace_strategy values, RUNS runs each.
-REPLACE_STRATEGY_LIST=("quality-only" "td-crowding" "edge-crowding")
+# Compare 4 elite_replace_strategy values, RUNS runs each.
+REPLACE_STRATEGY_LIST=("quality-only" "td-crowding" "edge-crowding" "random-target")
 
 # ... on 3 hand-picked --elite-pool-size values, grouped into named "sets"
 # (po1..po3). Each set fixes a pool size per customer count:
