@@ -18,7 +18,11 @@ Reports 3 numbers per tolerance value:
   - irpd (%): trapezoidal-rule average of R0..R8 (RPD (%) of
     best_solution_cost_by_evaluation_checkpoint at 0/8..8/8 of the
     evaluation budget vs BKS working_time), (1/8) * [(R0+R8)/2 + R1+...+R7]
-  - Tolerance (%): pull_tolerance_satisfied_count / pull_offer_count
+  - AR / accepted_transfer (%): pull_accept_count / pull_offer_count --
+    of the offers a worker's pull request could get (offered = at least
+    one elite in the pool from a worker other than the requester), how
+    many actually get sent back to it (see pick_for_dispatch in
+    parallel.cpp; same metric as exp2/c/exp2/g's AR)
 
 RPD (%) = (value - BKS) / BKS * 100, same as exp1.5/stats.py. final_rpd
 uses the final best cost (solution.working_time); irpd uses the tracked
@@ -29,25 +33,15 @@ elite-replace-strategy=quality-only/random-target), which can carry an
 infeasibility penalty at early checkpoints if the best-known solution
 isn't yet feasible at that point.
 
-Tolerance (%) is deliberately NOT pull_accept_count / pull_offer_count
-(exp2/c's Accept (%)): pull_accept_count also requires the above-average-
-diversity check to pass, which pull_tolerance_satisfied_count does not --
-it counts every offer whose cost satisfies cost_e <= quality_tolerance *
-cost_personal_best, i.e. within the tolerance window, which trivially
-includes offers that already beat the personal best outright (cost_e <
-cost_personal_best implies cost_e < quality_tolerance * cost_personal_best
-too, since quality_tolerance >= 1).
-
 Aggregation: same style as exp2/c/d for final_rpd and irpd -- computed per
 run first (using that run's own solution/checkpoints vs BKS), then averaged
 over that instance's runs, then averaged over instances (4 by default: 2
-customer counts x 2 combos). Tolerance (%) instead follows exp2/c's
-pooling: N_tolerance_satisfied summed over the instance's runs /
-N_offer summed over the instance's runs * 100 (not averaged per-run),
-since offer counts can vary a lot run to run -- pooling weights each pull
-attempt equally instead of each run equally. These per-instance numbers
-are then averaged over instances to get each tolerance value's final
-numbers.
+customer counts x 2 combos). AR (%) instead follows exp2/c's pooling:
+N_accept summed over the instance's runs / N_offer summed over the
+instance's runs * 100 (not averaged per-run), since offer counts can vary
+a lot run to run -- pooling weights each pull attempt equally instead of
+each run equally. These per-instance numbers are then averaged over
+instances to get each tolerance value's final numbers.
 
 Looks for run files at
 <outputs>/<n>/<n>.<combo>-tol<tolerance>-<run_id>.json (the naming used by
@@ -122,41 +116,41 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
     for tolerance in TOLERANCE_LIST:
         run_files = find_run_files(outputs_dir, n, instance, tolerance)
 
-        rpds, irpds_per_run, satisfied_counts, offer_counts = [], [], [], []
+        rpds, irpds_per_run, offer_counts, accepted_counts = [], [], [], []
         for run_id, path in run_files:
             data = load_run(path)
             final_cost = data["solution"]["working_time"]
-            sat = data["pull_tolerance_satisfied_count"]
             off = data["pull_offer_count"]
+            acc = data["pull_accept_count"]
             cps = data.get("best_solution_cost_by_evaluation_checkpoint")
 
             run_rpd = rpd_pct(final_cost, bks_value)
-            run_tolerance_pct = sat / off * 100.0 if off else None
+            run_ar_pct = acc / off * 100.0 if off else None
 
             if run_rpd is not None:
                 rpds.append(run_rpd)
             if cps is not None and len(cps) == NUM_CHECKPOINTS:
                 run_r = [rpd_pct(v, bks_value) for v in cps]
                 irpds_per_run.append(irpd_pct(run_r))
-            satisfied_counts.append(sat)
             offer_counts.append(off)
+            accepted_counts.append(acc)
 
             detail_rows.append({
                 "n": n, "instance": instance, "tolerance": tolerance, "run": run_id,
                 "final_cost": final_cost, "final_rpd_pct": run_rpd,
-                "pull_tolerance_satisfied_count": sat, "pull_offer_count": off,
-                "tolerance_pct": run_tolerance_pct,
+                "pull_offer_count": off,
+                "pull_accept_count": acc, "ar_pct": run_ar_pct,
             })
 
         total_offer = sum(offer_counts)
-        tolerance_pct = sum(satisfied_counts) / total_offer * 100.0 if total_offer else None
+        ar_pct = sum(accepted_counts) / total_offer * 100.0 if total_offer else None
 
         summary_rows.append({
             "n": n, "instance": instance, "tolerance": tolerance,
             "bks": bks_value, "runs": len(run_files), "expected_runs": expected_runs,
             "final_rpd_pct": mean_or_none(rpds),
             "irpd_pct": mean_or_none(irpds_per_run),
-            "tolerance_pct": tolerance_pct,
+            "ar_pct": ar_pct,
         })
     return summary_rows, detail_rows
 
@@ -225,13 +219,13 @@ def main():
         vals = [r[f] for r in rows if r[f] is not None]
         return statistics.mean(vals) if vals else None
 
-    # ---- final_rpd(%), irpd(%), and Tolerance Accept(%) per quality-tolerance value ----
+    # ---- final_rpd(%), irpd(%), and AR(%) per quality-tolerance value ----
     # final_rpd(%) and irpd(%): stratified average, per run -> mean over
     # runs (per instance, done in compute_instance) -> mean over instances
-    # (here). InTolerance(%): pooled per instance (done in compute_instance)
-    # -> mean over instances (here).
-    out(f"{'Tolerance(%)':<14}{'final_RPD(%)':>14}{'irpd(%)':>10}{'InTolerance(%)':>16}")
-    out("-" * 54)
+    # (here). AR(%): pooled per instance (done in compute_instance) ->
+    # mean over instances (here).
+    out(f"{'Tolerance(%)':<14}{'final_RPD(%)':>14}{'irpd(%)':>10}{'AR(%)':>10}")
+    out("-" * 48)
     tolerance_rows = []
     for tolerance in TOLERANCE_LIST:
         rows = [r for r in summary_rows if r["tolerance"] == tolerance]
@@ -239,12 +233,12 @@ def main():
             "tolerance": tolerance,
             "final_rpd_pct": avg_field(rows, "final_rpd_pct"),
             "irpd_pct": avg_field(rows, "irpd_pct"),
-            "tolerance_pct": avg_field(rows, "tolerance_pct"),
+            "ar_pct": avg_field(rows, "ar_pct"),
         }
         tolerance_rows.append(tolerance_row)
         out(f"{tolerance:<14}{fmt(tolerance_row['final_rpd_pct'], 3):>14}"
             f"{fmt(tolerance_row['irpd_pct'], 3):>10}"
-            f"{fmt(tolerance_row['tolerance_pct'], 3):>16}")
+            f"{fmt(tolerance_row['ar_pct'], 3):>10}")
     if incomplete:
         out(f"\nNote: fewer runs found than expected for: {', '.join(incomplete)}")
 

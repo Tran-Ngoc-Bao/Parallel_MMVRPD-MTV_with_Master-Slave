@@ -206,8 +206,6 @@ static bool is_significantly_better(double fx, double fe)
 struct PickResult {
     bool offered = false;
     const Solution* solution = nullptr;
-    // Selective accept only: cost fell within the quality-tolerance window.
-    bool tolerance_satisfied = false;
 };
 
 struct ElitePool {
@@ -431,10 +429,10 @@ struct ElitePool {
         const double quality_tolerance = 1.0 + global_config().elite_pull_quality_tolerance_pct / 100.0;
         const bool tolerance_satisfied = cost_e <= quality_tolerance * cost_personal_best;
         if (cost_e < cost_personal_best) {
-            return {true, picked, tolerance_satisfied};
+            return {true, picked};
         }
         if (!tolerance_satisfied) {
-            return {true, nullptr, false};
+            return {true, nullptr};
         }
         std::vector<double> d_values;
         d_values.reserve(candidates.size());
@@ -447,10 +445,10 @@ struct ElitePool {
                                  / static_cast<double>(d_values.size());
             const double d_e = static_cast<double>(requester_personal_best->edge_distance(*picked));
             if (d_e > mean_d) {
-                return {true, picked, true};
+                return {true, picked};
             }
         }
-        return {true, nullptr, true};
+        return {true, nullptr};
     }
 
 private:
@@ -506,8 +504,6 @@ Solution run_master(int world_size)
     std::size_t pull_request_count = 0;
     std::size_t pull_offer_count = 0;
     std::size_t pull_accept_count = 0;
-    // Offers whose cost fell within the quality-tolerance window (see exp2/e).
-    std::size_t pull_tolerance_satisfied_count = 0;
     // Per-worker request counts only -- offer/accept are tracked globally
     // above (that's the granularity exp2/c and exp2/d actually need).
     std::vector<std::size_t> worker_pull_request_counts_by_rank(static_cast<std::size_t>(world_size), 0);
@@ -634,7 +630,6 @@ Solution run_master(int world_size)
                     requester_personal_best ? &*requester_personal_best : nullptr);
                 if (pick.offered) ++pull_offer_count;
                 if (pick.solution) ++pull_accept_count;
-                if (pick.tolerance_satisfied) ++pull_tolerance_satisfied_count;
                 elite_to_send = pick.solution;
             }
 
@@ -718,7 +713,6 @@ Solution run_master(int world_size)
                      worker_search_seeds, worker_coop_seeds,
                      pull_offer_count, pull_accept_count,
                      pull_request_count, worker_pull_request_counts,
-                     pull_tolerance_satisfied_count,
                      evaluation_budget > 0 ? best_solution_cost_by_checkpoint : std::vector<double>{},
                      evaluation_budget > 0 ? diversity_by_checkpoint : std::vector<double>{},
                      total_pull_round_improved_count, worker_pull_round_improved_counts);

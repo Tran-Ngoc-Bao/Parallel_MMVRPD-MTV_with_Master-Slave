@@ -47,7 +47,6 @@ struct Logger {
                   std::size_t pull_accept_count = 0,
                   std::size_t pull_request_count = 0,
                   const std::vector<std::size_t>& worker_pull_request_counts = {},
-                  std::size_t pull_tolerance_satisfied_count = 0,
                   const std::vector<double>& best_solution_cost_by_evaluation_checkpoint = {},
                   const std::vector<double>& diversity_by_evaluation_checkpoint = {},
                   std::size_t pull_round_improved_count = 0,

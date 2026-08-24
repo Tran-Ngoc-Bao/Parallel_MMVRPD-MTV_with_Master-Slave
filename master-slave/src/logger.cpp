@@ -174,7 +174,6 @@ void Logger::finalize(const Solution& result,
                       std::size_t pull_accept_count,
                       std::size_t pull_request_count,
                       const std::vector<std::size_t>& worker_pull_request_counts,
-                      std::size_t pull_tolerance_satisfied_count,
                       const std::vector<double>& best_solution_cost_by_evaluation_checkpoint,
                       const std::vector<double>& diversity_by_evaluation_checkpoint,
                       std::size_t pull_round_improved_count,
@@ -219,7 +218,6 @@ void Logger::finalize(const Solution& result,
     run["elite_pool_costs"]                    = elite_pool_costs;
     run["pull_offer_count"]                    = pull_offer_count;
     run["pull_accept_count"]                   = pull_accept_count;
-    run["pull_tolerance_satisfied_count"]      = pull_tolerance_satisfied_count;
     run["pull_request_count"]                  = pull_request_count;
     run["pull_request_rate_per_million_evals"] = total_evaluations > 0
         ? static_cast<double>(pull_request_count) / static_cast<double>(total_evaluations) * 1e6
