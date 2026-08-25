@@ -30,11 +30,11 @@ Instance    Pull        Accept       Runs     RPD(%)     AR(%)
 500.40.1    random      always         10     -0.187         -
 500.40.1    random      selective      10     -0.436    45.455
 500.40.1    topk        always         10     -0.358         -
-500.40.1    topk        selective       7     -0.394    66.261
-500.40.1    rank        always          6     -0.249         -
-500.40.1    rank        selective       6     -0.372    54.949
-500.40.1    pullcount   always          6     -0.385         -
-500.40.1    pullcount   selective       6     -0.318    55.678
+500.40.1    topk        selective      10     -0.471    65.510
+500.40.1    rank        always         10     -0.295         -
+500.40.1    rank        selective      10     -0.353    54.008
+500.40.1    pullcount   always         10     -0.358         -
+500.40.1    pullcount   selective      10     -0.321    51.965
 
 Instance    Pull          AlwaysRPD(%)  SelectRPD(%)  DeltaAcc(%)  SelectAR(%)
 ------------------------------------------------------------------------------
@@ -51,13 +51,13 @@ Instance    Pull          AlwaysRPD(%)  SelectRPD(%)  DeltaAcc(%)  SelectAR(%)
 500.10.2    rank                -0.652        -1.012        0.361       44.710
 500.10.2    pullcount           -0.878        -1.071        0.193       49.546
 500.40.1    random              -0.187        -0.436        0.249       45.455
-500.40.1    topk                -0.358        -0.394        0.036       66.261
-500.40.1    rank                -0.249        -0.372        0.123       54.949
-500.40.1    pullcount           -0.385        -0.318       -0.067       55.678
+500.40.1    topk                -0.358        -0.471        0.112       65.510
+500.40.1    rank                -0.295        -0.353        0.058       54.008
+500.40.1    pullcount           -0.358        -0.321       -0.038       51.965
 
 PullStrategy    AlwaysRPD(%)  SelectRPD(%)  DeltaAcc(%)  SelectAR(%)
 --------------------------------------------------------------------
 random                -0.403        -0.575        0.172       44.656
-topk                  -0.466        -0.524        0.058       55.798
-rank                  -0.485        -0.642        0.157       52.261
-pullcount             -0.547        -0.576        0.029       52.765
+topk                  -0.466        -0.543        0.077       55.610
+rank                  -0.496        -0.637        0.141       52.026
+pullcount             -0.540        -0.577        0.036       51.837

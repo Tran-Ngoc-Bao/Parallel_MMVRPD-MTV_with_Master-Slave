@@ -219,6 +219,17 @@ def main():
         vals = [r[f] for r in rows if r[f] is not None]
         return statistics.mean(vals) if vals else None
 
+    # ---- Per-instance-per-tolerance detail ----
+    detail_header = (f"{'Instance':<12}{'Tolerance(%)':<14}{'Runs':>6}"
+                      f"{'final_RPD(%)':>14}{'irpd(%)':>10}{'AR(%)':>10}")
+    out(detail_header)
+    out("-" * len(detail_header))
+    for r in summary_rows:
+        out(f"{r['instance']:<12}{r['tolerance']:<14}{r['runs']:>6}"
+            f"{fmt(r['final_rpd_pct'], 3):>14}{fmt(r['irpd_pct'], 3):>10}"
+            f"{fmt(r['ar_pct'], 3):>10}")
+    out()
+
     # ---- final_rpd(%), irpd(%), and AR(%) per quality-tolerance value ----
     # final_rpd(%) and irpd(%): stratified average, per run -> mean over
     # runs (per instance, done in compute_instance) -> mean over instances
