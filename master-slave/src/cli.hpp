@@ -102,6 +102,7 @@ struct RunArgs {
     std::optional<std::size_t> fix_iteration = std::nullopt;
     double        reset_after_factor         = 125.0;
     std::size_t   max_elite_size             = 0;
+    double        time_limit                 = 0.0;
     std::size_t   max_evaluations            = 0;
     double        penalty_exponent           = 0.5;
     bool          single_truck_route         = false;

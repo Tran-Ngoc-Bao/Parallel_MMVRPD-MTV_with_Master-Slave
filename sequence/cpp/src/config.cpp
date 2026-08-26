@@ -435,6 +435,10 @@ nlohmann::json config_to_json(const Config& cfg) {
         j["fix_iteration"]         = *cfg.fix_iteration;
     else
         j["fix_iteration"]         = nullptr;
+    if (cfg.seed)
+        j["seed"]                  = *cfg.seed;
+    else
+        j["seed"]                  = nullptr;
     j["reset_after_factor"]        = cfg.reset_after_factor;
     j["max_elite_size"]            = cfg.max_elite_size;
     j["time_limit"]                = cfg.time_limit;
@@ -590,6 +594,8 @@ Config build_config_from_json(const std::string& json_path)
     cfg.disable_logging           = j.at("disable_logging").get<bool>();
     cfg.dry_run                   = j.at("dry_run").get<bool>();
     cfg.extra                     = j.at("extra").get<std::string>();
+    if (j.contains("seed") && !j.at("seed").is_null())
+        cfg.seed                  = j.at("seed").get<std::uint64_t>();
     return cfg;
 }
 

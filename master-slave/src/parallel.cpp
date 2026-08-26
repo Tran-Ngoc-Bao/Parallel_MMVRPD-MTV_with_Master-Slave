@@ -474,7 +474,7 @@ std::size_t compute_elite_pool_size(const Config& cfg, int world_size)
     constexpr std::size_t kMaxClamp = 20;
 
     const double scaled = cfg.elite_pool_factor * std::sqrt(static_cast<double>(cfg.customers_count)) * static_cast<double>(world_size - 1);
-    const std::size_t derived = static_cast<std::size_t>(std::round(scaled));
+    const std::size_t derived = static_cast<std::size_t>(std::ceil(scaled));
     return std::clamp(derived, kMinClamp, kMaxClamp);
 }
 

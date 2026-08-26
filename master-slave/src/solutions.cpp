@@ -1109,10 +1109,18 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
         ? *cfg.fix_iteration
         : std::numeric_limits<size_t>::max() / 2;
 
+    auto search_start = std::chrono::steady_clock::now();
+
     for (size_t iteration = 1; iteration <= max_iter; ++iteration) {
-        // Stop-condition priority: max-evaluations, then non-improving
-        // segments (checked further below via elite_set).
+        // Stop-condition priority: max-evaluations, then time-limit, then
+        // non-improving segments (checked further below via elite_set).
         if (cfg.max_evaluations > 0 && total_evals >= cfg.max_evaluations) break;
+
+        if (cfg.time_limit > 0.0) {
+            double elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - search_start).count();
+            if (elapsed >= cfg.time_limit) break;
+        }
 
         if (cfg.verbose) {
             auto segments_before_reset = [&]() -> size_t {
@@ -1218,7 +1226,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                     adaptive.weights.assign(NUM_NEIGHBORHOODS, 1.0);
 
                     if (elite_set.empty()) {
-                        if (cfg.max_evaluations > 0) elite_set.push_back(result);
+                        if (cfg.max_evaluations > 0 || cfg.time_limit > 0.0) elite_set.push_back(result);
                         else break;
                     }
 
@@ -1283,7 +1291,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                 adaptive.weights.assign(NUM_NEIGHBORHOODS, 1.0);
 
                 if (elite_set.empty()) {
-                    if (cfg.max_evaluations > 0) elite_set.push_back(result);
+                    if (cfg.max_evaluations > 0 || cfg.time_limit > 0.0) elite_set.push_back(result);
                     else break;
                 }
 
