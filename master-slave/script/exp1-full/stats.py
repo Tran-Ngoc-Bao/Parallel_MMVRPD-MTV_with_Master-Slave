@@ -15,18 +15,19 @@ Per instance (n.combo), for each of seq_ims and ms independently:
 Comparison, per instance (only when both pipelines have an avg RPD):
   - delta_rpd (%) : avg_rpd(seq_ims) - avg_rpd(ms)
                      (positive => ms has the lower/better RPD)
-  - ms_win         : 1 if delta_rpd > RPD_TIE_EPSILON, else 0
-                     (a delta smaller than the epsilon is a tie, not a win --
-                     without this, two runs that both land exactly on BKS can
-                     show a "win" purely from floating-point summation-order
-                     noise on the order of 1e-13/1e-14 percent)
+  - ms_result      : "win" if delta_rpd > RPD_TIE_EPSILON,
+                      "tie" if |delta_rpd| <= RPD_TIE_EPSILON,
+                      "loss" if delta_rpd < -RPD_TIE_EPSILON
+                     (the epsilon guards against floating-point
+                     summation-order noise on the order of 1e-13/1e-14
+                     percent when both pipelines land exactly on BKS)
 
 Aggregated per customer count n (mean over that n's instances, except
-ms_wins which is a "wins/total" fraction):
+ms_wins/ms_ties/ms_losses which are "count/total" fractions):
   - avg_rpd_seq_ims(n), avg_cv_seq_ims(n), avg_rpd_ms(n), avg_cv_ms(n)
   - avg_delta_rpd(n): mean of the instances' delta_rpd
-  - ms_wins(n): (# instances where ms_win) / (# instances for that n),
-    shown as e.g. "3/4"
+  - ms_wins(n), ms_ties(n), ms_losses(n): (# instances with that
+    ms_result) / (# instances for that n), shown as e.g. "3/4"
 
 Plus one final "overall" row aggregating across all n's the same way.
 
@@ -121,10 +122,15 @@ def compute_row(seq_ims_dir: Path, ms_dir: Path, bks_dir: Path, n: str, instance
     ms = compute_pipeline_stats(ms_dir, bks_value, n, instance)
 
     delta_rpd = None
-    ms_win = None
+    ms_result = None
     if seq_ims["avg_rpd_pct"] is not None and ms["avg_rpd_pct"] is not None:
         delta_rpd = seq_ims["avg_rpd_pct"] - ms["avg_rpd_pct"]
-        ms_win = 1 if delta_rpd > RPD_TIE_EPSILON else 0
+        if delta_rpd > RPD_TIE_EPSILON:
+            ms_result = "win"
+        elif delta_rpd < -RPD_TIE_EPSILON:
+            ms_result = "loss"
+        else:
+            ms_result = "tie"
 
     return {
         "n": n, "instance": instance, "bks": bks_value,
@@ -134,7 +140,7 @@ def compute_row(seq_ims_dir: Path, ms_dir: Path, bks_dir: Path, n: str, instance
         "ms_runs": ms["runs"], "ms_avg_result": ms["avg_result"],
         "ms_avg_rpd_pct": ms["avg_rpd_pct"], "ms_std_dev": ms["std_dev"],
         "ms_cv_pct": ms["cv_pct"],
-        "delta_rpd_pct": delta_rpd, "ms_win": ms_win,
+        "delta_rpd_pct": delta_rpd, "ms_result": ms_result,
     }
 
 
@@ -192,8 +198,8 @@ def compute_n_summary(rows_for_n):
         vals = [r[key] for r in rows_for_n if r[key] is not None]
         return statistics.mean(vals) if vals else None
 
-    wins = sum(r["ms_win"] for r in rows_for_n if r["ms_win"] is not None)
-    n_instances = len(rows_for_n)
+    results = [r["ms_result"] for r in rows_for_n if r["ms_result"] is not None]
+    n_instances = len(results)
 
     return {
         "avg_rpd_seq_ims_pct": avg("seq_ims_avg_rpd_pct"),
@@ -201,7 +207,9 @@ def compute_n_summary(rows_for_n):
         "avg_rpd_ms_pct": avg("ms_avg_rpd_pct"),
         "avg_cv_ms_pct": avg("ms_cv_pct"),
         "avg_delta_rpd_pct": avg("delta_rpd_pct"),
-        "ms_wins_count": wins,
+        "ms_wins_count": results.count("win"),
+        "ms_ties_count": results.count("tie"),
+        "ms_losses_count": results.count("loss"),
         "ms_wins_total": n_instances,
     }
 
@@ -209,8 +217,8 @@ def compute_n_summary(rows_for_n):
 def compute_overall_summary(summary_rows):
     """One extra row aggregating across all n's, same pattern as
     compute_n_summary (instance -> n) applied one level up (n -> overall):
-    mean of each n's value, and ms_wins as total wins / total instances
-    across all n's."""
+    mean of each n's value, and ms_wins/ms_ties/ms_losses as total counts /
+    total instances across all n's."""
     def avg(key):
         vals = [r[key] for r in summary_rows if r[key] is not None]
         return statistics.mean(vals) if vals else None
@@ -223,6 +231,8 @@ def compute_overall_summary(summary_rows):
         "avg_cv_ms_pct": avg("avg_cv_ms_pct"),
         "avg_delta_rpd_pct": avg("avg_delta_rpd_pct"),
         "ms_wins_count": sum(r["ms_wins_count"] for r in summary_rows),
+        "ms_ties_count": sum(r["ms_ties_count"] for r in summary_rows),
+        "ms_losses_count": sum(r["ms_losses_count"] for r in summary_rows),
         "ms_wins_total": sum(r["ms_wins_total"] for r in summary_rows),
     }
 
@@ -272,23 +282,23 @@ def main():
     header = (f"{'Instance':<12}{'BKS(s)':>12}"
               f"{'RPD seq_ims(%)':>16}{'CV seq_ims(%)':>15}"
               f"{'RPD ms(%)':>13}{'CV ms(%)':>12}"
-              f"{'delta_rpd(%)':>13}{'ms_win':>8}")
+              f"{'delta_rpd(%)':>13}{'ms_result':>11}")
     print(header)
     print("-" * len(header))
     for r in rows:
-        win = "-" if r["ms_win"] is None else str(r["ms_win"])
+        result = "-" if r["ms_result"] is None else r["ms_result"]
         print(f"{r['instance']:<12}{fmt(r['bks']):>12}"
               f"{fmt(r['seq_ims_avg_rpd_pct'], 3):>16}{fmt(r['seq_ims_cv_pct'], 3):>15}"
               f"{fmt(r['ms_avg_rpd_pct'], 3):>13}{fmt(r['ms_cv_pct'], 3):>12}"
-              f"{fmt(r['delta_rpd_pct'], 3):>13}{win:>8}")
+              f"{fmt(r['delta_rpd_pct'], 3):>13}{result:>11}")
         for label, key in (("seq_ims", "seq_ims_runs"), ("ms", "ms_runs")):
             if r[key] and r[key] < args.runs:
                 print(f"    note: {label} only {r[key]}/{args.runs} runs found")
 
     print("\nNote: std dev is the sample standard deviation (ddof=1) of the per-run "
           "working_time values. delta_rpd = avg_rpd(seq_ims) - avg_rpd(ms); positive "
-          f"means ms had the lower (better) RPD. ms_win = 1 if delta_rpd > {RPD_TIE_EPSILON:g} "
-          "(smaller deltas count as a tie, not a win).")
+          "means ms had the lower (better) RPD. ms_result = win if delta_rpd > "
+          f"{RPD_TIE_EPSILON:g}, loss if delta_rpd < {-RPD_TIE_EPSILON:g}, else tie.")
 
     # ---- Aggregate: instance -> customer count n ----
     summary_rows = []
@@ -305,16 +315,18 @@ def main():
 
     print(f"\n{'n':<8}{'avg_rpd_seq_ims(%)':>20}{'avg_cv_seq_ims(%)':>19}"
           f"{'avg_rpd_ms(%)':>15}{'avg_cv_ms(%)':>14}"
-          f"{'avg_delta_rpd(%)':>18}{'ms_wins':>10}")
-    print("-" * 117)
+          f"{'avg_delta_rpd(%)':>18}{'ms_wins':>10}{'ms_ties':>10}{'ms_losses':>12}")
+    print("-" * 139)
     for s in summary_rows:
         if s is overall_row:
-            print("-" * 117)
+            print("-" * 139)
         ms_wins_str = fmt_fraction(s["ms_wins_count"], s["ms_wins_total"])
+        ms_ties_str = fmt_fraction(s["ms_ties_count"], s["ms_wins_total"])
+        ms_losses_str = fmt_fraction(s["ms_losses_count"], s["ms_wins_total"])
         rs = rounded_summary(s)
         print(f"{s['n']:<8}{fmt(rs['avg_rpd_seq_ims_pct'], 2):>20}{fmt(rs['avg_cv_seq_ims_pct'], 2):>19}"
               f"{fmt(rs['avg_rpd_ms_pct'], 2):>15}{fmt(rs['avg_cv_ms_pct'], 2):>14}"
-              f"{fmt(rs['avg_delta_rpd_pct'], 2):>18}{ms_wins_str:>10}")
+              f"{fmt(rs['avg_delta_rpd_pct'], 2):>18}{ms_wins_str:>10}{ms_ties_str:>10}{ms_losses_str:>12}")
 
     if args.no_save:
         return
@@ -340,7 +352,9 @@ def main():
     summary_path = outputs_root / "summary.csv"
     summary_csv_rows = [
         {"n": s["n"], **rounded_summary(s),
-         "ms_wins": fmt_fraction(s["ms_wins_count"], s["ms_wins_total"])}
+         "ms_wins": fmt_fraction(s["ms_wins_count"], s["ms_wins_total"]),
+         "ms_ties": fmt_fraction(s["ms_ties_count"], s["ms_wins_total"]),
+         "ms_losses": fmt_fraction(s["ms_losses_count"], s["ms_wins_total"])}
         for s in summary_rows
     ]
     write_csv(summary_path, summary_csv_rows)
