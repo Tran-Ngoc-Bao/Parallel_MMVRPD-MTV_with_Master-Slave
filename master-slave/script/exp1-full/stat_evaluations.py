@@ -1,29 +1,27 @@
 #!/usr/bin/env python3
 """
-Statistics on the number of evaluations (total_evaluations) from the result
-JSON files in outputs/<group>/<customers>/<customers>.<a>.<b>-<run>.json
+Thong ke so luong evaluations (total_evaluations) tu cac file JSON ket qua
+trong outputs/<group>/<customers>/<customers>.<a>.<b>-<run>.json
 
-NOTE: total_evaluations in master-slave's JSON is the cumulative total for
-the WHOLE program (summed across all slave workers running in parallel
-during that run's time_limit seconds), not for a single worker. This script
-therefore also computes avg_per_worker = total_evaluations / worker count,
-where the worker count for each run comes from the length of the
-"worker_seeds" array in that same JSON file (each slave worker has one
-entry in "worker_seeds").
+LUU Y: total_evaluations trong JSON cua master-slave la tong cong don cua
+TOAN BO chuong trinh (cong don qua tat ca cac worker slave chay song song
+trong RUNS giay time_limit do), khong phai cua rieng 1 worker. Script nay
+vi vay tinh them cot avg_per_worker = total_evaluations / so worker, voi
+so worker cua tung run lay tu do dai mang "worker_seeds" trong chinh file
+JSON do (moi worker slave co 1 phan tu trong "worker_seeds").
 
-Automatically scans every group directory (e.g. ms) and every available
-customers bucket (100, 200, 500, 1000, ...), so once data for customers
-1000 is added, just rerun the script to get updated results -- no code
-changes needed.
+Tu dong quet moi thu muc group (vd: coop) va moi bo customers co san
+(100, 200, 500, 1000, ...), nen khi co them du lieu customer 1000 chi can
+chay lai script la ra ket qua moi, khong can sua code.
 
-Usage:
+Cach chay:
     python3 stat_evaluations.py
-    python3 stat_evaluations.py --outputs-dir /other/path
-    python3 stat_evaluations.py --groups ms --field total_evaluations
+    python3 stat_evaluations.py --outputs-dir /duong/dan/khac
+    python3 stat_evaluations.py --groups coop --field total_evaluations
 
-Output:
-    evaluations_by_instance.csv   -> data table, open in Excel/Sheets
-    evaluations_by_instance.txt   -> aligned-column table, easy to read directly
+Ket qua:
+    evaluations_by_instance.csv   -> bang du lieu, mo bang Excel/Sheets
+    evaluations_by_instance.txt   -> bang canh cot, de doc truc tiep
 """
 
 import argparse

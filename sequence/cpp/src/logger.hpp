@@ -3,6 +3,7 @@
 #include <fstream>
 #include <chrono>
 #include <optional>
+#include <vector>
 #include "neighborhoods.hpp"
 
 struct Solution;
@@ -30,5 +31,7 @@ struct Logger {
                   size_t last_improved,
                   double post_optimization,
                   double post_optimization_elapsed,
-                  std::size_t total_evaluations = 0);
+                  std::size_t total_evaluations = 0,
+                  const std::vector<double>& best_solution_cost_by_time_checkpoint = {},
+                  double time_checkpoint_limit = 0.0);
 };

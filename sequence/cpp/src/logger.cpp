@@ -160,7 +160,9 @@ void Logger::finalize(const Solution& result,
                       size_t last_improved,
                       double post_optimization,
                       double post_optimization_elapsed,
-                      std::size_t total_evaluations)
+                      std::size_t total_evaluations,
+                      const std::vector<double>& best_solution_cost_by_time_checkpoint,
+                      double time_checkpoint_limit)
 {
     const Config& cfg = global_config();
     if (cfg.disable_logging) return;
@@ -185,6 +187,8 @@ void Logger::finalize(const Solution& result,
     run["post_optimization"]          = post_optimization;
     run["post_optimization_elapsed"]  = post_optimization_elapsed;
     run["total_evaluations"]          = total_evaluations;
+    run["time_checkpoint_limit"]      = time_checkpoint_limit;
+    run["best_solution_cost_by_time_checkpoint"] = best_solution_cost_by_time_checkpoint;
 
     fs::path out(_outputs);
 

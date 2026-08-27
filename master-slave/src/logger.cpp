@@ -177,7 +177,9 @@ void Logger::finalize(const Solution& result,
                       const std::vector<double>& best_solution_cost_by_evaluation_checkpoint,
                       const std::vector<double>& diversity_by_evaluation_checkpoint,
                       std::size_t pull_round_improved_count,
-                      const std::vector<std::size_t>& worker_pull_round_improved_counts)
+                      const std::vector<std::size_t>& worker_pull_round_improved_counts,
+                      const std::vector<double>& best_solution_cost_by_time_checkpoint,
+                      double time_checkpoint_limit)
 {
     this->total_evaluations = total_evaluations;
 
@@ -213,6 +215,8 @@ void Logger::finalize(const Solution& result,
     run["best_cost_by_evaluation_checkpoint"]  = best_cost_by_evaluation_checkpoint;
     run["best_solution_cost_by_evaluation_checkpoint"] = best_solution_cost_by_evaluation_checkpoint;
     run["diversity_by_evaluation_checkpoint"]  = diversity_by_evaluation_checkpoint;
+    run["time_checkpoint_limit"]                       = time_checkpoint_limit;
+    run["best_solution_cost_by_time_checkpoint"]       = best_solution_cost_by_time_checkpoint;
     run["elite_pool_size"]                     = elite_pool_size;
     run["elite_pool_diversity"]                = elite_pool_diversity;
     run["elite_pool_costs"]                    = elite_pool_costs;

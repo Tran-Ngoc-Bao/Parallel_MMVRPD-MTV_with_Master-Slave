@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
 """
-Thong ke so luong evaluations (total_evaluations) tu cac file JSON ket qua
-trong sequence/cpp/outputs/<group>/<customers>/<customers>.<a>.<b>-<run>.json
+Thong ke so luong evaluations tu cac file JSON ket qua trong
+sequence/cpp/outputs/<group>/<customers>/<customers>.<a>.<b>-<run>.json
+
+LUU Y: file ket qua cua run_ims_full.sh la JSON cua worker cho ra nghiem
+tot nhat trong 1 island, nen "total_evaluations" trong do CHI la cua rieng
+worker do. run_ims_full.sh ghi them:
+  - "total_evaluations_all_workers": tong evaluations cong don qua TAT CA
+    worker cua island (day la truong script nay thong ke mac dinh)
+  - "num_workers": so worker da dong gop vao tong tren
+Script nay tinh them cot avg_per_worker = total_evaluations_all_workers /
+num_workers, giong master-slave/script/exp1-full/stat_evaluations.py (chi
+khac o cho lay so worker tu "num_workers" thay vi do dai "worker_seeds").
 
 Tu dong quet moi thu muc group (vd: ims, sats) va moi bo customers co san
-(100, 200, 500, 1000, ...), nen khi co them du lieu customer 1000 chi can
-chay lai script la ra ket qua moi, khong can sua code.
+(100, 200, 500, 1000, ...), nen khi co them du lieu chi can chay lai
+script la ra ket qua moi, khong can sua code.
 
 Cach chay:
     python3 stat_evaluations.py
     python3 stat_evaluations.py --outputs-dir /duong/dan/khac
-    python3 stat_evaluations.py --groups ims sats --field total_evaluations
+    python3 stat_evaluations.py --groups ims sats --field total_evaluations_all_workers
 
 Ket qua:
     evaluations_by_instance.csv   -> bang du lieu, mo bang Excel/Sheets
@@ -73,12 +83,19 @@ def collect_stats(outputs_dir, groups, field):
 
             for inst in sorted(by_instance.keys(), key=lambda s: tuple(map(int, s.split(".")))):
                 vals = []
+                per_worker_vals = []
+                worker_counts = []
                 for fpath in sorted(by_instance[inst]):
                     with open(fpath) as fh:
                         data = json.load(fh)
                     v = data.get(field)
-                    if v is not None:
-                        vals.append(v)
+                    if v is None:
+                        continue
+                    vals.append(v)
+                    num_workers = data.get("num_workers", 0)
+                    if num_workers > 0:
+                        per_worker_vals.append(v / num_workers)
+                        worker_counts.append(num_workers)
                 if not vals:
                     continue
                 rows.append({
@@ -90,6 +107,8 @@ def collect_stats(outputs_dir, groups, field):
                     "min": min(vals),
                     "max": max(vals),
                     "sum": sum(vals),
+                    "avg_per_worker": statistics.mean(per_worker_vals) if per_worker_vals else None,
+                    "avg_workers": statistics.mean(worker_counts) if worker_counts else None,
                 })
     return rows
 
@@ -98,10 +117,33 @@ def write_csv(rows, out_path):
     with open(out_path, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["group", "customers", "instance", "runs",
-                    "avg_evaluations", "min_evaluations", "max_evaluations", "sum_evaluations"])
+                    "avg_evaluations", "avg_evaluations_per_worker", "avg_workers",
+                    "min_evaluations", "max_evaluations", "sum_evaluations"])
         for r in rows:
+            avg_per_worker = f"{r['avg_per_worker']:.2f}" if r["avg_per_worker"] is not None else ""
+            avg_workers = f"{r['avg_workers']:.2f}" if r["avg_workers"] is not None else ""
             w.writerow([r["group"], r["customers"], r["instance"], r["runs"],
-                        f"{r['avg']:.2f}", r["min"], r["max"], r["sum"]])
+                        f"{r['avg']:.2f}", avg_per_worker, avg_workers,
+                        r["min"], r["max"], r["sum"]])
+
+
+def render_table(rows_data, columns):
+    """rows_data: list of dict[key->str]. columns: list of (key, label, align)
+    where align is '<' or '>'. Column widths are sized to the widest cell
+    actually present (label or data), plus a fixed gap -- so a column never
+    glues into its neighbour no matter how large the numbers get (unlike a
+    hardcoded width, which silently stops padding once content exceeds it)."""
+    GAP = 2
+    widths = {}
+    for key, label, _align in columns:
+        widest = max([len(label)] + [len(r[key]) for r in rows_data])
+        widths[key] = widest + GAP
+
+    def render_row(r):
+        return "".join(f"{r[key]:{align}{widths[key]}}" for key, _label, align in columns)
+
+    header = "".join(f"{label:{align}{widths[key]}}" for key, label, align in columns)
+    return header, [render_row(r) for r in rows_data]
 
 
 def write_txt(rows, out_path, field):
@@ -111,6 +153,17 @@ def write_txt(rows, out_path, field):
     lines.append("=" * 94)
     lines.append("")
 
+    columns = [
+        ("instance", "Instance", "<"),
+        ("runs", "Runs", ">"),
+        ("avg", "Avg", ">"),
+        ("avg_per_worker", "Avg/worker", ">"),
+        ("workers", "Workers", ">"),
+        ("min", "Min", ">"),
+        ("max", "Max", ">"),
+        ("sum", "Sum", ">"),
+    ]
+
     groups = sorted(set(r["group"] for r in rows))
     for group in groups:
         lines.append(f"### Thu muc: {group}")
@@ -118,32 +171,57 @@ def write_txt(rows, out_path, field):
         customers_list = sorted(set(r["customers"] for r in rows if r["group"] == group), key=int)
         for customers in customers_list:
             sub_rows = [r for r in rows if r["group"] == group and r["customers"] == customers]
-            header = f"{'Instance':<12}{'Runs':>6}{'Avg':>20}{'Min':>16}{'Max':>16}{'Sum':>20}"
-            lines.append(f"-- Bo customer = {customers} --")
-            lines.append(header)
-            lines.append("-" * len(header))
+            if not sub_rows:
+                continue
+
             all_vals_sum = 0
             all_vals_runs = 0
             all_vals_min = None
             all_vals_max = None
             weighted_avg_num = 0
+            weighted_avg_per_worker_num = 0
+            per_worker_runs = 0
+
+            table_rows = []
             for r in sub_rows:
-                lines.append(
-                    f"{r['instance']:<12}{r['runs']:>6}{r['avg']:>20,.2f}"
-                    f"{r['min']:>16,}{r['max']:>16,}{r['sum']:>20,}"
-                )
+                avg_per_worker_str = f"{r['avg_per_worker']:,.2f}" if r["avg_per_worker"] is not None else "-"
+                workers_str = f"{r['avg_workers']:,.1f}" if r["avg_workers"] is not None else "-"
+                table_rows.append({
+                    "instance": r["instance"], "runs": str(r["runs"]),
+                    "avg": f"{r['avg']:,.2f}", "avg_per_worker": avg_per_worker_str,
+                    "workers": workers_str,
+                    "min": f"{r['min']:,}", "max": f"{r['max']:,}", "sum": f"{r['sum']:,}",
+                })
+
                 all_vals_sum += r["sum"]
                 all_vals_runs += r["runs"]
                 weighted_avg_num += r["avg"] * r["runs"]
+                if r["avg_per_worker"] is not None:
+                    weighted_avg_per_worker_num += r["avg_per_worker"] * r["runs"]
+                    per_worker_runs += r["runs"]
                 all_vals_min = r["min"] if all_vals_min is None else min(all_vals_min, r["min"])
                 all_vals_max = r["max"] if all_vals_max is None else max(all_vals_max, r["max"])
-            if sub_rows:
-                lines.append("-" * len(header))
-                overall_avg = weighted_avg_num / all_vals_runs if all_vals_runs else 0
-                lines.append(
-                    f"{'TONG/TB':<12}{all_vals_runs:>6}{overall_avg:>20,.2f}"
-                    f"{all_vals_min:>16,}{all_vals_max:>16,}{all_vals_sum:>20,}"
-                )
+
+            overall_avg = weighted_avg_num / all_vals_runs if all_vals_runs else 0
+            overall_avg_per_worker = (weighted_avg_per_worker_num / per_worker_runs
+                                       if per_worker_runs else None)
+            overall_avg_per_worker_str = (f"{overall_avg_per_worker:,.2f}"
+                                           if overall_avg_per_worker is not None else "-")
+            total_row = {
+                "instance": "TONG/TB", "runs": str(all_vals_runs),
+                "avg": f"{overall_avg:,.2f}", "avg_per_worker": overall_avg_per_worker_str,
+                "workers": "",
+                "min": f"{all_vals_min:,}", "max": f"{all_vals_max:,}", "sum": f"{all_vals_sum:,}",
+            }
+
+            header, rendered_rows = render_table(table_rows + [total_row], columns)
+
+            lines.append(f"-- Bo customer = {customers} --")
+            lines.append(header)
+            lines.append("-" * len(header))
+            lines.extend(rendered_rows[:-1])
+            lines.append("-" * len(header))
+            lines.append(rendered_rows[-1])
             lines.append("")
         lines.append("")
 
@@ -160,8 +238,8 @@ def main():
                          help="Duong dan toi thu muc outputs (mac dinh: thu muc chua script nay)")
     parser.add_argument("--groups", nargs="*", default=None,
                          help="Danh sach thu muc group can thong ke, vd: ims sats (mac dinh: tu dong quet tat ca)")
-    parser.add_argument("--field", default="total_evaluations",
-                         help="Ten truong trong JSON can thong ke (mac dinh: total_evaluations)")
+    parser.add_argument("--field", default="total_evaluations_all_workers",
+                         help="Ten truong trong JSON can thong ke (mac dinh: total_evaluations_all_workers)")
     parser.add_argument("--csv-out", default=None, help="Ten file CSV dau ra")
     parser.add_argument("--txt-out", default=None, help="Ten file TXT dau ra")
     args = parser.parse_args()

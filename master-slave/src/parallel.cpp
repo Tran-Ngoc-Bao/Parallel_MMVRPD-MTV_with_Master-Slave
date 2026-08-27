@@ -340,10 +340,12 @@ struct ElitePool {
     // offered = false if no elite in the pool originates from a worker other
     // than excluded_worker. Otherwise offered = true, and solution is
     // non-null unless (accept_strategy is Selective and) the picked elite
-    // fails the accept check against the requester's own personal best.
+    // fails the accept check: quality is judged against the requester's own
+    // personal best, diversity against the requester's current solution.
     PickResult pick_for_dispatch(int excluded_worker, std::mt19937& rng, cli::ElitePullStrategy strategy,
                                   cli::ElitePullAcceptStrategy accept_strategy,
-                                  const Solution* requester_personal_best)
+                                  const Solution* requester_personal_best,
+                                  const Solution* requester_current)
     {
         std::vector<std::size_t> candidates;
         for (std::size_t i = 0; i < solutions.size(); ++i) {
@@ -437,13 +439,13 @@ struct ElitePool {
         std::vector<double> d_values;
         d_values.reserve(candidates.size());
         for (std::size_t idx : candidates) {
-            const double d = static_cast<double>(requester_personal_best->edge_distance(solutions[idx].sol));
+            const double d = static_cast<double>(requester_current->edge_distance(solutions[idx].sol));
             if (d > 0.0) d_values.push_back(d);
         }
         if (!d_values.empty()) {
             const double mean_d = std::accumulate(d_values.begin(), d_values.end(), 0.0)
                                  / static_cast<double>(d_values.size());
-            const double d_e = static_cast<double>(requester_personal_best->edge_distance(*picked));
+            const double d_e = static_cast<double>(requester_current->edge_distance(*picked));
             if (d_e > mean_d) {
                 return {true, picked};
             }
@@ -520,6 +522,22 @@ Solution run_master(int world_size)
     std::vector<double> diversity_by_checkpoint(9, 0.0);
     std::vector<bool> checkpoint_captured(9, false);
 
+    // Time-based analog of the evaluation checkpoints above: an 8-way split
+    // of the time_limit, timed by the master. The clock does NOT start at t1
+    // (that would count MPI dispatch + each worker's construction); it starts
+    // when the last worker's first elite push arrives -- that push is the
+    // worker's constructed root, sent right as its search begins (MPI keeps
+    // it ahead of any improvement push from the same worker). Checkpoint 0 is
+    // pinned to the best of those roots (best initial solution in the island).
+    const double time_checkpoint_limit = base_cfg.time_limit;
+    std::size_t next_time_checkpoint = 0;
+    std::vector<double> best_solution_cost_by_time_checkpoint(9, 0.0);
+    std::vector<bool> time_checkpoint_captured(9, false);
+    std::optional<double> best_initial_cost;
+    std::optional<std::chrono::steady_clock::time_point> time_checkpoint_origin;
+    std::vector<bool> worker_first_push_seen(static_cast<std::size_t>(world_size), false);
+    std::size_t initial_push_reports = 0;
+
     auto current_running_total = [&]() {
         std::size_t total = 0;
         for (int r = 1; r < world_size; ++r) total += latest_worker_evals[static_cast<std::size_t>(r)];
@@ -554,6 +572,38 @@ Solution run_master(int world_size)
         }
     };
 
+    auto capture_time_checkpoint = [&](std::size_t idx) {
+        if (time_checkpoint_captured[idx]) return;
+        if (idx == 0) {
+            // cp0 = best initial solution; only valid once every worker has
+            // pushed its constructed root.
+            if (initial_push_reports < static_cast<std::size_t>(world_size - 1)) return;
+            best_solution_cost_by_time_checkpoint[0] = *best_initial_cost;
+        } else {
+            if (!best_solution) return;
+            best_solution_cost_by_time_checkpoint[idx] = best_solution->cost();
+        }
+        time_checkpoint_captured[idx] = true;
+    };
+
+    auto capture_due_time_checkpoints = [&]() {
+        if (time_checkpoint_limit <= 0.0 || !time_checkpoint_origin) return;
+        const double elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - *time_checkpoint_origin).count();
+        if (next_time_checkpoint == 0) {
+            capture_time_checkpoint(0);
+            if (!time_checkpoint_captured[0]) return;
+            next_time_checkpoint = 1;
+        }
+        // Checkpoint 8 excluded here -- left to the post-loop catch-up so it
+        // always reflects the true final best_solution.
+        while (next_time_checkpoint <= 7 &&
+               elapsed >= time_checkpoint_limit * static_cast<double>(next_time_checkpoint) / 8.0) {
+            capture_time_checkpoint(next_time_checkpoint);
+            ++next_time_checkpoint;
+        }
+    };
+
     auto start_worker = [&](int worker_rank) {
         const std::size_t search_seed = base_seed + static_cast<std::size_t>(worker_rank);
         const std::size_t coop_seed   = 10000 + base_seed + static_cast<std::size_t>(worker_rank);
@@ -570,6 +620,7 @@ Solution run_master(int world_size)
 
     while (active_workers > 0) {
         bool processed = false;
+        capture_due_time_checkpoints();
 
         // Handle elite pushes from workers
         for (;;) {
@@ -580,6 +631,19 @@ Solution run_master(int world_size)
             processed = true;
             const int worker_rank = status.MPI_SOURCE;
             Solution elite = recv_solution(worker_rank, TAG_ELITE_PUSH);
+            // Time-limit runs only: a worker's first push is its constructed
+            // root -> feeds cp0, and the last one to arrive starts the
+            // time-checkpoint clock. (Eval-limit runs checkpoint differently.)
+            if (time_checkpoint_limit > 0.0
+                && !worker_first_push_seen[static_cast<std::size_t>(worker_rank)]) {
+                worker_first_push_seen[static_cast<std::size_t>(worker_rank)] = true;
+                ++initial_push_reports;
+                const double root_cost = elite.cost();
+                if (!best_initial_cost || root_cost < *best_initial_cost) best_initial_cost = root_cost;
+                if (initial_push_reports == static_cast<std::size_t>(world_size - 1)) {
+                    time_checkpoint_origin = std::chrono::steady_clock::now();
+                }
+            }
             if (!best_solution || elite.cost() < best_solution->cost()) {
                 best_solution = elite;
             }
@@ -616,6 +680,10 @@ Solution run_master(int world_size)
             if (pull_req.contains("personal_best")) {
                 requester_personal_best = Solution::from_json(pull_req.at("personal_best"));
             }
+            std::optional<Solution> requester_current;
+            if (pull_req.contains("current")) {
+                requester_current = Solution::from_json(pull_req.at("current"));
+            }
 
             ++pull_request_count;
             ++worker_pull_request_counts_by_rank[static_cast<std::size_t>(worker_rank)];
@@ -627,7 +695,8 @@ Solution run_master(int world_size)
                 PickResult pick = elite_pool.pick_for_dispatch(
                     worker_rank, it->second, base_cfg.elite_pull_strategy,
                     base_cfg.elite_pull_accept_strategy,
-                    requester_personal_best ? &*requester_personal_best : nullptr);
+                    requester_personal_best ? &*requester_personal_best : nullptr,
+                    requester_current ? &*requester_current : nullptr);
                 if (pick.offered) ++pull_offer_count;
                 if (pick.solution) ++pull_accept_count;
                 elite_to_send = pick.solution;
@@ -666,6 +735,7 @@ Solution run_master(int world_size)
                 worker_pull_round_improved_count;
             latest_worker_evals[static_cast<std::size_t>(worker_rank)] = worker_evaluations;
             capture_due_checkpoints();
+            capture_due_time_checkpoints();
 
             worker_running[static_cast<std::size_t>(worker_rank)] = false;
             --active_workers;
@@ -679,6 +749,12 @@ Solution run_master(int world_size)
     if (evaluation_budget > 0) {
         for (std::size_t idx = 0; idx <= 8; ++idx) {
             capture_checkpoint(idx);
+        }
+    }
+
+    if (time_checkpoint_limit > 0.0) {
+        for (std::size_t idx = 0; idx <= 8; ++idx) {
+            capture_time_checkpoint(idx);
         }
     }
 
@@ -715,7 +791,10 @@ Solution run_master(int world_size)
                      pull_request_count, worker_pull_request_counts,
                      evaluation_budget > 0 ? best_solution_cost_by_checkpoint : std::vector<double>{},
                      evaluation_budget > 0 ? diversity_by_checkpoint : std::vector<double>{},
-                     total_pull_round_improved_count, worker_pull_round_improved_counts);
+                     total_pull_round_improved_count, worker_pull_round_improved_counts,
+                     time_checkpoint_limit > 0.0 ? best_solution_cost_by_time_checkpoint
+                                                 : std::vector<double>{},
+                     time_checkpoint_limit);
     return *best_solution;
 }
 
@@ -749,12 +828,13 @@ void run_worker(int /*rank*/)
     hooks.pull_round_improved = [&]() { ++pull_round_improved_count; };
 
     if (worker_cfg.elite_pull_strategy != cli::ElitePullStrategy::Off) {
-        hooks.pull_elite = [&](std::size_t iteration, const Solution& personal_best, Solution& pulled_elite) -> bool {
+        hooks.pull_elite = [&](std::size_t iteration, const Solution& personal_best, const Solution& current, Solution& pulled_elite) -> bool {
             nlohmann::json j;
             j["iteration"] = iteration;
             j["seed"]      = coop_seed;
             if (worker_cfg.elite_pull_accept_strategy == cli::ElitePullAcceptStrategy::Selective) {
                 j["personal_best"] = personal_best.to_json();
+                j["current"]       = current.to_json();
             }
             send_string_impl(0, TAG_ELITE_PULL, j.dump());
             switch (recv_pull_reply(0, TAG_ELITE_REPLY, pulled_elite)) {

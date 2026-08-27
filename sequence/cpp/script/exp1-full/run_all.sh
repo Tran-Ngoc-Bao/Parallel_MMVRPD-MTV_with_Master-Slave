@@ -2,10 +2,11 @@
 set -euo pipefail
 export LC_NUMERIC=C
 
-# exp1-full: run4_ims only (no sats), across every instance actually
-# present in data/ for every customer count from 6 to 1000 (12 combos for
-# n=6/10/12/20, 16 combos for n=50/100/200/500/1000) -- not just the
-# diagonal 4 combos ../exp1 uses.
+# exp1-full: run_ims first (all customer counts), then run_sats (all
+# customer counts), across every instance actually present in data/ for
+# every customer count from 6 to 1000 (12 combos for n=6/10/12/20, 16
+# combos for n=50/100/200/500/1000) -- not just the diagonal 4 combos
+# ../exp1 uses. sats runs only after ims has fully finished.
 #
 # Requires BKS files for every instance: run gen_bks.py once beforehand
 # (see ../gen_bks.py) to populate/refresh bks/<n>/<n>.<combo>-bks.json
@@ -22,55 +23,61 @@ JOBS=(
     "100   10"
     "200   35"
     "500   700"
-    "1000  4500"
+    # "1000  4500"
 )
 
 # Usage:
 #   bash run_all.sh [RUNS] [SLEEP_SEC] [CPU_CORES]
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMS_SCRIPT="${SCRIPT_DIR}/run4_ims_full.sh"
-STATS_SCRIPT="${SCRIPT_DIR}/stats.py"
+IMS_SCRIPT="${SCRIPT_DIR}/run_ims_full.sh"
+SATS_SCRIPT="${SCRIPT_DIR}/run_sats_full.sh"
 
 RUNS="${1:-10}"
 SLEEP_SEC="${2:-0.0}"
 CPU_CORES="${3:-0,2,4,6,8,10}"
 
-# n=1000 only needs 5 runs; every other n uses the RUNS above (default 10).
+# n=1000 only needs 5 runs; every other n uses the RUNS above.
 RUNS_1000=5
 
-run_stats() {
-    local customers_so_far="$1"
-    local stage="$2"
-    local runs="$3"
-    echo
-    echo "---- stats after ${stage} (n=${customers_so_far}) ----"
-    python3 "${STATS_SCRIPT}" --customers "${customers_so_far}" --runs "${runs}"
+# run_phase <label> <script>
+run_phase() {
+    local label="$1"
+    local phase_script="$2"
+    local JOB N TIME_LIMIT
+    for JOB in "${JOBS[@]}"; do
+        read -r N TIME_LIMIT <<< "${JOB}"
+
+        local job_runs="${RUNS}"
+        if [ "${N}" = "1000" ]; then
+            job_runs="${RUNS_1000}"
+        fi
+
+        echo
+        echo "################################################################"
+        echo "# n=${N}  time_limit=${TIME_LIMIT}s  runs=${job_runs}  [${label}]  $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "################################################################"
+        bash "${phase_script}" "${N}" "${job_runs}" "${SLEEP_SEC}" "${CPU_CORES}" "${TIME_LIMIT}"
+    done
 }
 
-N_LIST=()
 START_TS=$(date +%s)
-for JOB in "${JOBS[@]}"; do
-    read -r N TIME_LIMIT <<< "${JOB}"
-    N_LIST+=("${N}")
-    CUSTOMERS_SO_FAR="$(IFS=,; echo "${N_LIST[*]}")"
 
-    JOB_RUNS="${RUNS}"
-    if [ "${N}" = "1000" ]; then
-        JOB_RUNS="${RUNS_1000}"
-    fi
+echo
+echo "================================================================"
+echo "= PHASE 1/2: ims"
+echo "================================================================"
+run_phase "ims" "${IMS_SCRIPT}"
 
-    echo
-    echo "################################################################"
-    echo "# n=${N}  time_limit=${TIME_LIMIT}s  runs=${JOB_RUNS}  [ims]  $(date '+%Y-%m-%d %H:%M:%S')"
-    echo "################################################################"
-    bash "${IMS_SCRIPT}" "${N}" "${JOB_RUNS}" "${SLEEP_SEC}" "${CPU_CORES}" "${TIME_LIMIT}"
-    run_stats "${CUSTOMERS_SO_FAR}" "ims, n=${N}" "${JOB_RUNS}"
-done
+echo
+echo "================================================================"
+echo "= PHASE 2/2: sats"
+echo "================================================================"
+run_phase "sats" "${SATS_SCRIPT}"
 
 ELAPSED=$(( $(date +%s) - START_TS ))
-CUSTOMERS="$(IFS=,; echo "${N_LIST[*]}")"
+CUSTOMERS="$(for JOB in "${JOBS[@]}"; do read -r N _ <<< "${JOB}"; echo "${N}"; done | paste -sd,)"
 echo
 echo "################################################################"
-echo "# All done: n=${CUSTOMERS} in ${ELAPSED}s"
+echo "# All done (ims + sats): n=${CUSTOMERS} in ${ELAPSED}s"
 echo "################################################################"

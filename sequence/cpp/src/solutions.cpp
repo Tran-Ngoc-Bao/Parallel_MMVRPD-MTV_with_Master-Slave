@@ -842,6 +842,13 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
 
     auto search_start = std::chrono::steady_clock::now();
 
+    // 8-way split of the time_limit budget, capturing the running best
+    // solution cost at each checkpoint (empty unless a time_limit is set).
+    const bool track_time_checkpoints = cfg.time_limit > 0.0;
+    std::vector<double> best_solution_cost_by_time_checkpoint;
+    std::size_t next_time_checkpoint = 0;
+    if (track_time_checkpoints) best_solution_cost_by_time_checkpoint.assign(9, 0.0);
+
     for (size_t iteration = 1; iteration <= max_iter; ++iteration) {
         // Stop-condition priority: max-evaluations, then time-limit, then
         // non-improving segments (checked further below via elite_set).
@@ -850,6 +857,11 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
         if (cfg.time_limit > 0.0) {
             double elapsed = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - search_start).count();
+            while (next_time_checkpoint <= 8 &&
+                   elapsed >= cfg.time_limit * static_cast<double>(next_time_checkpoint) / 8.0) {
+                best_solution_cost_by_time_checkpoint[next_time_checkpoint] = result.cost();
+                ++next_time_checkpoint;
+            }
             if (elapsed >= cfg.time_limit) break;
         }
 
@@ -1007,11 +1019,24 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
 
     if (cfg.verbose) std::cerr << "\n";
 
+    // Fill any checkpoints not reached in-loop (and slot 8) with the final
+    // best cost so the series always has 9 entries.
+    if (track_time_checkpoints) {
+        while (next_time_checkpoint <= 8) {
+            best_solution_cost_by_time_checkpoint[next_time_checkpoint] = result.cost();
+            ++next_time_checkpoint;
+        }
+        best_solution_cost_by_time_checkpoint[8] = result.cost();
+    }
+
     // post_optimization stub (not implemented, matches Rust comment-out)
     double post_opt = 0.0, post_opt_elapsed = 0.0;
 
     logger.finalize(result, tabu_sz, reset_after, adap_its,
                     adaptive.segment, last_improved,
-                    post_opt, post_opt_elapsed, total_evals);
+                    post_opt, post_opt_elapsed, total_evals,
+                    track_time_checkpoints ? best_solution_cost_by_time_checkpoint
+                                           : std::vector<double>{},
+                    cfg.time_limit);
     return result;
 }

@@ -1,42 +1,34 @@
 #!/usr/bin/env python3
 """
-Statistics for run_full.sh output (exp1-full), plus a head-to-head
-comparison against sequence/cpp's exp1-full (run4_ims_full.sh) output --
-same idea as ../../../sequence/cpp/script/exp1/stats.py's sats-vs-ims
-comparison, but here it's master-slave vs sequence's ims.
+Statistics for master-slave exp1-full (run_full.sh, the cooperative
+pipeline tagged "coop"), side by side with sequence/cpp's exp1-full sats
+and ims pipelines.
 
-Per instance (n.combo), for each of seq_ims and ms independently:
-  - avg result : mean working_time (seconds) over the runs found
-  - avg RPD (%): (avg result - BKS) / BKS * 100
-  - std dev    : sample standard deviation (ddof=1) of the per-run
-                 working_time values
-  - CV (%)     : std dev / avg result * 100
+Per instance (n.combo):
+  - RPD sats (%)  : mean final RPD of sequence/cpp sats
+  - RPD ims (%)   : mean final RPD of sequence/cpp ims
+  - RPD coop (%)  : mean final RPD of master-slave coop
+    where final RPD of a run = (working_time - BKS) / BKS * 100, and the
+    per-instance value is the mean over the runs found.
+  - delta_coop (%): RPD ims - RPD coop   (bigger is better: positive means
+                    coop's RPD is lower, i.e. coop is better than ims)
+  - result        : coop vs ims -- "win" if delta_coop > RPD_TIE_EPSILON,
+                    "loss" if delta_coop < -RPD_TIE_EPSILON, else "tie"
+  - evals coop/ims: per run, coop run k's all-worker eval total divided by
+                    ims run k's (paired by run index) -- coop uses
+                    total_evaluations, ims uses total_evaluations_all_workers,
+                    both being the sum over every worker of that run. Those
+                    per-run ratios are then meaned over the instance's paired
+                    runs.
 
-Comparison, per instance (only when both pipelines have an avg RPD):
-  - delta_rpd (%) : avg_rpd(seq_ims) - avg_rpd(ms)
-                     (positive => ms has the lower/better RPD)
-  - ms_result      : "win" if delta_rpd > RPD_TIE_EPSILON,
-                      "tie" if |delta_rpd| <= RPD_TIE_EPSILON,
-                      "loss" if delta_rpd < -RPD_TIE_EPSILON
-                     (the epsilon guards against floating-point
-                     summation-order noise on the order of 1e-13/1e-14
-                     percent when both pipelines land exactly on BKS)
+Aggregated per customer count n as the unweighted mean over that n's
+instances of each per-instance value (win/tie/loss as "count/total"),
+i.e. the same run -> instance -> customer order as every other column.
+Plus one final "overall" row: the unweighted mean over all instances.
 
-Aggregated per customer count n (mean over that n's instances, except
-ms_wins/ms_ties/ms_losses which are "count/total" fractions):
-  - avg_rpd_seq_ims(n), avg_cv_seq_ims(n), avg_rpd_ms(n), avg_cv_ms(n)
-  - avg_delta_rpd(n): mean of the instances' delta_rpd
-  - ms_wins(n), ms_ties(n), ms_losses(n): (# instances with that
-    ms_result) / (# instances for that n), shown as e.g. "3/4"
-
-Plus one final "overall" row aggregating across all n's the same way.
-
-Instances are discovered from <ms-outputs>/<n>/*.json and
-<seq-ims-outputs>/<n>/*.json file names (union of both, so an instance
-missing from one side still shows up with "-" for that side), so this
-works regardless of how many combos exist for a given n. BKS values come
-from <bks>/<n>/<n>.<combo>-bks.json (shared between sequence and
-master-slave, see ../../../sequence/cpp/script/gen_bks.py).
+Instances are discovered from the union of the three pipelines' file names
+under <dir>/<n>/. BKS values come from <bks>/<n>/<n>.<combo>-bks.json
+(shared, see ../../../sequence/cpp/script/gen_bks.py).
 
 Usage:
     python3 stats.py
@@ -50,17 +42,29 @@ import statistics
 from pathlib import Path
 
 
-# Deltas smaller than this (in RPD percentage points) are treated as a tie
-# rather than a win -- guards against floating-point summation-order noise
-# (~1e-13/1e-14 %) when both pipelines land exactly on BKS being counted as
-# a "win" for whichever side happens to round a hair lower.
+# Deltas smaller than this (in RPD percentage points) are a tie, not a
+# win/loss -- guards against floating-point summation-order noise
+# (~1e-13/1e-14 %) when both pipelines land exactly on BKS.
 RPD_TIE_EPSILON = 1e-6
+
+COOP_EVALS_FIELD = "total_evaluations"
+IMS_EVALS_FIELD = "total_evaluations_all_workers"
+
+# Instances used to tune parameters; the "held-out" summary row aggregates
+# every other instance.
+TUNING_INSTANCES = {"200.10.2", "200.40.1", "500.10.2", "500.40.1"}
 
 
 def load_working_time(path: Path) -> float:
     with path.open() as f:
         data = json.load(f)
     return data["solution"]["working_time"]
+
+
+def load_field(path: Path, field: str):
+    with path.open() as f:
+        data = json.load(f)
+    return data.get(field)
 
 
 def discover_instances(outputs_dir: Path, n: str):
@@ -76,7 +80,7 @@ def discover_instances(outputs_dir: Path, n: str):
     return instances
 
 
-def find_run_files(outputs_dir: Path, n: str, instance: str):
+def find_run_files_indexed(outputs_dir: Path, n: str, instance: str):
     inst_dir = outputs_dir / n
     if not inst_dir.is_dir():
         return []
@@ -87,60 +91,76 @@ def find_run_files(outputs_dir: Path, n: str, instance: str):
         if m:
             found.append((int(m.group(1)), f))
     found.sort(key=lambda t: t[0])
-    return [f for _, f in found]
+    return found
 
 
-def compute_pipeline_stats(outputs_dir: Path, bks_value, n: str, instance: str):
-    """avg result / avg RPD (%) / std dev / CV (%) for one instance, for a
-    single pipeline (seq_ims or ms)."""
+def find_run_files(outputs_dir: Path, n: str, instance: str):
+    return [f for _, f in find_run_files_indexed(outputs_dir, n, instance)]
+
+
+def load_evals_by_run(outputs_dir: Path, n, instance, field):
+    """{run_index: that run's all-worker evaluation total} for the runs that
+    carry `field`."""
+    out = {}
+    for idx, path in find_run_files_indexed(outputs_dir, n, instance):
+        v = load_field(path, field)
+        if v is not None:
+            out[idx] = v
+    return out
+
+
+def compute_pipeline_stats(outputs_dir: Path, bks_value, n, instance):
+    """For one instance + one pipeline: mean final RPD (%) over the runs
+    found (run -> instance averaging, same as everything else)."""
     run_files = find_run_files(outputs_dir, n, instance)
-
     if not run_files:
-        return {
-            "runs": 0, "avg_result": None, "avg_rpd_pct": None,
-            "std_dev": None, "cv_pct": None,
-        }
+        return {"runs": 0, "avg_rpd_pct": None}
 
     results = [load_working_time(f) for f in run_files]
     avg_result = statistics.mean(results)
-    std_dev = statistics.stdev(results) if len(results) > 1 else 0.0
-    cv_pct = (std_dev / avg_result * 100.0) if avg_result else None
     avg_rpd_pct = ((avg_result - bks_value) / bks_value * 100.0
                    if bks_value else None)
-
-    return {
-        "runs": len(results), "avg_result": avg_result,
-        "avg_rpd_pct": avg_rpd_pct, "std_dev": std_dev, "cv_pct": cv_pct,
-    }
+    return {"runs": len(results), "avg_rpd_pct": avg_rpd_pct}
 
 
-def compute_row(seq_ims_dir: Path, ms_dir: Path, bks_dir: Path, n: str, instance: str):
+def compute_row(sats_dir, ims_dir, coop_dir, bks_dir, n, instance):
     bks_path = bks_dir / n / f"{instance}-bks.json"
     bks_value = load_working_time(bks_path) if bks_path.is_file() else None
 
-    seq_ims = compute_pipeline_stats(seq_ims_dir, bks_value, n, instance)
-    ms = compute_pipeline_stats(ms_dir, bks_value, n, instance)
+    sats = compute_pipeline_stats(sats_dir, bks_value, n, instance)
+    ims = compute_pipeline_stats(ims_dir, bks_value, n, instance)
+    coop = compute_pipeline_stats(coop_dir, bks_value, n, instance)
 
-    delta_rpd = None
-    ms_result = None
-    if seq_ims["avg_rpd_pct"] is not None and ms["avg_rpd_pct"] is not None:
-        delta_rpd = seq_ims["avg_rpd_pct"] - ms["avg_rpd_pct"]
-        if delta_rpd > RPD_TIE_EPSILON:
-            ms_result = "win"
-        elif delta_rpd < -RPD_TIE_EPSILON:
-            ms_result = "loss"
+    delta_coop = None
+    coop_result = None
+    if ims["avg_rpd_pct"] is not None and coop["avg_rpd_pct"] is not None:
+        delta_coop = ims["avg_rpd_pct"] - coop["avg_rpd_pct"]
+        if delta_coop > RPD_TIE_EPSILON:
+            coop_result = "win"
+        elif delta_coop < -RPD_TIE_EPSILON:
+            coop_result = "loss"
         else:
-            ms_result = "tie"
+            coop_result = "tie"
+
+    # evals ratio: divide per run (coop run k / ims run k, paired by run
+    # index), then mean those ratios over the instance's paired runs.
+    coop_by_run = load_evals_by_run(coop_dir, n, instance, COOP_EVALS_FIELD)
+    ims_by_run = load_evals_by_run(ims_dir, n, instance, IMS_EVALS_FIELD)
+    paired = sorted(k for k in coop_by_run if k in ims_by_run and ims_by_run[k])
+    per_run_ratios = [coop_by_run[k] / ims_by_run[k] for k in paired]
+    evals_ratio = statistics.mean(per_run_ratios) if per_run_ratios else None
+    coop_evals = statistics.mean(coop_by_run[k] for k in paired) if paired else None
+    ims_evals = statistics.mean(ims_by_run[k] for k in paired) if paired else None
 
     return {
         "n": n, "instance": instance, "bks": bks_value,
-        "seq_ims_runs": seq_ims["runs"], "seq_ims_avg_result": seq_ims["avg_result"],
-        "seq_ims_avg_rpd_pct": seq_ims["avg_rpd_pct"], "seq_ims_std_dev": seq_ims["std_dev"],
-        "seq_ims_cv_pct": seq_ims["cv_pct"],
-        "ms_runs": ms["runs"], "ms_avg_result": ms["avg_result"],
-        "ms_avg_rpd_pct": ms["avg_rpd_pct"], "ms_std_dev": ms["std_dev"],
-        "ms_cv_pct": ms["cv_pct"],
-        "delta_rpd_pct": delta_rpd, "ms_result": ms_result,
+        "sats_runs": sats["runs"], "sats_rpd_pct": sats["avg_rpd_pct"],
+        "ims_runs": ims["runs"], "ims_rpd_pct": ims["avg_rpd_pct"],
+        "coop_runs": coop["runs"], "coop_rpd_pct": coop["avg_rpd_pct"],
+        "delta_coop_pct": delta_coop, "coop_result": coop_result,
+        "evals_paired_runs": len(paired),
+        "coop_evals": coop_evals, "ims_evals": ims_evals,
+        "evals_ratio": evals_ratio,
     }
 
 
@@ -152,36 +172,26 @@ def fmt_fraction(count, total):
     return f"{count}/{total}"
 
 
-def round2(v):
-    return round(v, 2) if v is not None else None
+def mean_or_none(vals):
+    vals = [v for v in vals if v is not None]
+    return statistics.mean(vals) if vals else None
 
 
-def rounded_summary(s):
-    """Rounds a summary row's avg_* fields to 2dp and recomputes
-    avg_delta_rpd_pct from the already-rounded seq_ims/ms values, so the
-    displayed delta always exactly equals (rounded seq_ims - rounded ms)
-    instead of drifting a cent off from rounding a separately-averaged
-    delta on its own."""
-    seq_ims_r = round2(s["avg_rpd_seq_ims_pct"])
-    ms_r = round2(s["avg_rpd_ms_pct"])
-    delta_r = round2(seq_ims_r - ms_r) if seq_ims_r is not None and ms_r is not None else None
+def summarize(rows):
+    """One summary dict for a set of per-instance rows (used per-n and
+    overall): unweighted mean over instances of each per-instance value --
+    same run -> instance -> bucket order as every other column here."""
+    results = [r["coop_result"] for r in rows if r["coop_result"] is not None]
     return {
-        "avg_rpd_seq_ims_pct": seq_ims_r, "avg_cv_seq_ims_pct": round2(s["avg_cv_seq_ims_pct"]),
-        "avg_rpd_ms_pct": ms_r, "avg_cv_ms_pct": round2(s["avg_cv_ms_pct"]),
-        "avg_delta_rpd_pct": delta_r,
-    }
-
-
-def pipeline_view(row, pipeline: str):
-    """Extract the seq_ims-only or ms-only columns of a combined row, in the
-    single-pipeline shape (instance, runs, avg_result, bks, avg_rpd_pct,
-    std_dev, cv_pct) -- what gets saved into <outputs>/<n>/stats.csv."""
-    p = pipeline + "_"
-    return {
-        "n": row["n"], "instance": row["instance"],
-        "runs": row[p + "runs"], "avg_result": row[p + "avg_result"],
-        "bks": row["bks"], "avg_rpd_pct": row[p + "avg_rpd_pct"],
-        "std_dev": row[p + "std_dev"], "cv_pct": row[p + "cv_pct"],
+        "avg_rpd_sats_pct": mean_or_none(r["sats_rpd_pct"] for r in rows),
+        "avg_rpd_ims_pct": mean_or_none(r["ims_rpd_pct"] for r in rows),
+        "avg_rpd_coop_pct": mean_or_none(r["coop_rpd_pct"] for r in rows),
+        "avg_delta_coop_pct": mean_or_none(r["delta_coop_pct"] for r in rows),
+        "coop_wins": results.count("win"),
+        "coop_ties": results.count("tie"),
+        "coop_losses": results.count("loss"),
+        "n_compared": len(results),
+        "evals_ratio": mean_or_none(r["evals_ratio"] for r in rows),
     }
 
 
@@ -193,79 +203,34 @@ def write_csv(path: Path, rows):
         writer.writerows(rows)
 
 
-def compute_n_summary(rows_for_n):
-    def avg(key):
-        vals = [r[key] for r in rows_for_n if r[key] is not None]
-        return statistics.mean(vals) if vals else None
-
-    results = [r["ms_result"] for r in rows_for_n if r["ms_result"] is not None]
-    n_instances = len(results)
-
-    return {
-        "avg_rpd_seq_ims_pct": avg("seq_ims_avg_rpd_pct"),
-        "avg_cv_seq_ims_pct": avg("seq_ims_cv_pct"),
-        "avg_rpd_ms_pct": avg("ms_avg_rpd_pct"),
-        "avg_cv_ms_pct": avg("ms_cv_pct"),
-        "avg_delta_rpd_pct": avg("delta_rpd_pct"),
-        "ms_wins_count": results.count("win"),
-        "ms_ties_count": results.count("tie"),
-        "ms_losses_count": results.count("loss"),
-        "ms_wins_total": n_instances,
-    }
-
-
-def compute_overall_summary(summary_rows):
-    """One extra row aggregating across all n's, same pattern as
-    compute_n_summary (instance -> n) applied one level up (n -> overall):
-    mean of each n's value, and ms_wins/ms_ties/ms_losses as total counts /
-    total instances across all n's."""
-    def avg(key):
-        vals = [r[key] for r in summary_rows if r[key] is not None]
-        return statistics.mean(vals) if vals else None
-
-    return {
-        "n": "overall",
-        "avg_rpd_seq_ims_pct": avg("avg_rpd_seq_ims_pct"),
-        "avg_cv_seq_ims_pct": avg("avg_cv_seq_ims_pct"),
-        "avg_rpd_ms_pct": avg("avg_rpd_ms_pct"),
-        "avg_cv_ms_pct": avg("avg_cv_ms_pct"),
-        "avg_delta_rpd_pct": avg("avg_delta_rpd_pct"),
-        "ms_wins_count": sum(r["ms_wins_count"] for r in summary_rows),
-        "ms_ties_count": sum(r["ms_ties_count"] for r in summary_rows),
-        "ms_losses_count": sum(r["ms_losses_count"] for r in summary_rows),
-        "ms_wins_total": sum(r["ms_wins_total"] for r in summary_rows),
-    }
-
-
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--seq-sats-outputs", default="../../../sequence/cpp/outputs/exp1-full/sats",
+                    help="sequence/cpp run_sats_full.sh output dir, relative to this "
+                         "script (default: ../../../sequence/cpp/outputs/exp1-full/sats)")
     ap.add_argument("--seq-ims-outputs", default="../../../sequence/cpp/outputs/exp1-full/ims",
-                     help="Dir containing sequence/cpp's run4_ims_full.sh output, relative "
-                          "to this script (default: "
-                          "../../../sequence/cpp/outputs/exp1-full/ims)")
-    ap.add_argument("--ms-outputs", default="../../outputs/exp1-full/ms",
-                     help="Dir containing run_full.sh output, relative to this script "
-                          "(default: ../../outputs/exp1-full/ms)")
+                    help="sequence/cpp run_ims_full.sh output dir, relative to this "
+                         "script (default: ../../../sequence/cpp/outputs/exp1-full/ims)")
+    ap.add_argument("--coop-outputs", default="../../outputs/exp1-full/coop",
+                    help="master-slave run_full.sh output dir, relative to this "
+                         "script (default: ../../outputs/exp1-full/coop)")
     ap.add_argument("--bks", default="../../../bks",
-                     help="Dir containing BKS json files, relative to this script "
-                          "(default: ../../../bks)")
+                    help="BKS json dir, relative to this script (default: ../../../bks)")
     ap.add_argument("--customers", default="6,10,12,20,50,100,200,500,1000",
-                     help="Comma-separated customer counts (default: "
-                          "6,10,12,20,50,100,200,500,1000)")
+                    help="Comma-separated customer counts")
     ap.add_argument("--runs", type=int, default=10,
-                     help="Expected number of runs per instance, for the 'only X/N "
-                          "found' note (default: 10)")
+                    help="Expected runs per instance, for the 'only X/N found' note")
     ap.add_argument("--outputs", default="../../outputs/exp1-full",
-                     help="Root outputs dir, relative to this script -- where "
-                          "summary.csv is written (default: ../../outputs/exp1-full)")
+                    help="Root outputs dir -- where summary.csv / instances.csv are written")
     ap.add_argument("--no-save", action="store_true",
-                     help="Only print to stdout, don't write any CSV files")
+                    help="Only print to stdout, don't write CSV files")
     args = ap.parse_args()
 
     script_dir = Path(__file__).resolve().parent
-    seq_ims_dir = (script_dir / args.seq_ims_outputs).resolve()
-    ms_dir = (script_dir / args.ms_outputs).resolve()
+    sats_dir = (script_dir / args.seq_sats_outputs).resolve()
+    ims_dir = (script_dir / args.seq_ims_outputs).resolve()
+    coop_dir = (script_dir / args.coop_outputs).resolve()
     bks_dir = (script_dir / args.bks).resolve()
     outputs_root = (script_dir / args.outputs).resolve()
 
@@ -273,92 +238,92 @@ def main():
 
     rows = []
     for n in customers:
-        instances = sorted(discover_instances(seq_ims_dir, n) | discover_instances(ms_dir, n))
+        instances = sorted(discover_instances(sats_dir, n)
+                           | discover_instances(ims_dir, n)
+                           | discover_instances(coop_dir, n))
         for instance in instances:
-            rows.append(compute_row(seq_ims_dir, ms_dir, bks_dir, n, instance))
+            rows.append(compute_row(sats_dir, ims_dir, coop_dir, bks_dir, n, instance))
 
-    print(f"seq_ims outputs: {seq_ims_dir}\nms outputs:      {ms_dir}\n")
+    print(f"sats outputs: {sats_dir}\nims  outputs: {ims_dir}\ncoop outputs: {coop_dir}\n")
 
     header = (f"{'Instance':<12}{'BKS(s)':>12}"
-              f"{'RPD seq_ims(%)':>16}{'CV seq_ims(%)':>15}"
-              f"{'RPD ms(%)':>13}{'CV ms(%)':>12}"
-              f"{'delta_rpd(%)':>13}{'ms_result':>11}")
+              f"{'RPD sats(%)':>14}{'RPD ims(%)':>13}{'RPD coop(%)':>14}"
+              f"{'delta_coop(%)':>15}{'result':>8}{'evals coop/ims':>16}")
     print(header)
     print("-" * len(header))
     for r in rows:
-        result = "-" if r["ms_result"] is None else r["ms_result"]
+        result = "-" if r["coop_result"] is None else r["coop_result"]
         print(f"{r['instance']:<12}{fmt(r['bks']):>12}"
-              f"{fmt(r['seq_ims_avg_rpd_pct'], 3):>16}{fmt(r['seq_ims_cv_pct'], 3):>15}"
-              f"{fmt(r['ms_avg_rpd_pct'], 3):>13}{fmt(r['ms_cv_pct'], 3):>12}"
-              f"{fmt(r['delta_rpd_pct'], 3):>13}{result:>11}")
-        for label, key in (("seq_ims", "seq_ims_runs"), ("ms", "ms_runs")):
+              f"{fmt(r['sats_rpd_pct'], 3):>14}{fmt(r['ims_rpd_pct'], 3):>13}"
+              f"{fmt(r['coop_rpd_pct'], 3):>14}{fmt(r['delta_coop_pct'], 3):>15}"
+              f"{result:>8}{fmt(r['evals_ratio'], 3):>16}")
+        for label, key in (("sats", "sats_runs"), ("ims", "ims_runs"), ("coop", "coop_runs")):
             if r[key] and r[key] < args.runs:
                 print(f"    note: {label} only {r[key]}/{args.runs} runs found")
 
-    print("\nNote: std dev is the sample standard deviation (ddof=1) of the per-run "
-          "working_time values. delta_rpd = avg_rpd(seq_ims) - avg_rpd(ms); positive "
-          "means ms had the lower (better) RPD. ms_result = win if delta_rpd > "
-          f"{RPD_TIE_EPSILON:g}, loss if delta_rpd < {-RPD_TIE_EPSILON:g}, else tie.")
+    print("\nNote: RPD = (working_time - BKS) / BKS * 100, meaned over runs. "
+          "delta_coop = RPD ims - RPD coop; bigger is better -- positive means "
+          f"coop had the lower (better) RPD. result: win if delta_coop > "
+          f"{RPD_TIE_EPSILON:g}, loss if < {-RPD_TIE_EPSILON:g}, else tie.")
 
-    # ---- Aggregate: instance -> customer count n ----
+    # ---- Aggregate: per customer count n, then overall + held-out ----
     summary_rows = []
     for n in customers:
         rows_for_n = [r for r in rows if r["n"] == n]
-        if not rows_for_n:
-            continue
-        s = compute_n_summary(rows_for_n)
-        summary_rows.append({"n": n, **s})
-
-    # ---- Aggregate: customer count n -> overall (all n's combined) ----
-    overall_row = compute_overall_summary(summary_rows)
+        if rows_for_n:
+            summary_rows.append({"n": n, **summarize(rows_for_n)})
+    overall_row = {"n": "overall", **summarize(rows)}
+    held_out_row = {"n": "held-out",
+                    **summarize([r for r in rows if r["instance"] not in TUNING_INSTANCES])}
     summary_rows.append(overall_row)
+    summary_rows.append(held_out_row)
 
-    print(f"\n{'n':<8}{'avg_rpd_seq_ims(%)':>20}{'avg_cv_seq_ims(%)':>19}"
-          f"{'avg_rpd_ms(%)':>15}{'avg_cv_ms(%)':>14}"
-          f"{'avg_delta_rpd(%)':>18}{'ms_wins':>10}{'ms_ties':>10}{'ms_losses':>12}")
-    print("-" * 139)
+    sh = (f"{'n':<9}{'avg_rpd_sats(%)':>17}{'avg_rpd_ims(%)':>16}{'avg_rpd_coop(%)':>17}"
+          f"{'avg_delta_coop(%)':>19}{'wins':>7}{'ties':>7}{'losses':>8}"
+          f"{'evals coop/ims':>16}")
+    print(f"\n{sh}")
+    print("-" * len(sh))
     for s in summary_rows:
         if s is overall_row:
-            print("-" * 139)
-        ms_wins_str = fmt_fraction(s["ms_wins_count"], s["ms_wins_total"])
-        ms_ties_str = fmt_fraction(s["ms_ties_count"], s["ms_wins_total"])
-        ms_losses_str = fmt_fraction(s["ms_losses_count"], s["ms_wins_total"])
-        rs = rounded_summary(s)
-        print(f"{s['n']:<8}{fmt(rs['avg_rpd_seq_ims_pct'], 2):>20}{fmt(rs['avg_cv_seq_ims_pct'], 2):>19}"
-              f"{fmt(rs['avg_rpd_ms_pct'], 2):>15}{fmt(rs['avg_cv_ms_pct'], 2):>14}"
-              f"{fmt(rs['avg_delta_rpd_pct'], 2):>18}{ms_wins_str:>10}{ms_ties_str:>10}{ms_losses_str:>12}")
+            print("-" * len(sh))
+        total = s["n_compared"]
+        print(f"{str(s['n']):<9}{fmt(s['avg_rpd_sats_pct'], 2):>17}{fmt(s['avg_rpd_ims_pct'], 2):>16}"
+              f"{fmt(s['avg_rpd_coop_pct'], 2):>17}{fmt(s['avg_delta_coop_pct'], 2):>19}"
+              f"{fmt_fraction(s['coop_wins'], total):>7}{fmt_fraction(s['coop_ties'], total):>7}"
+              f"{fmt_fraction(s['coop_losses'], total):>8}{fmt(s['evals_ratio'], 3):>16}")
 
     if args.no_save:
         return
 
-    # ---- Save: per-n stats.csv inside each pipeline's own <n>/ dir ----
-    saved = []
-    for n in customers:
-        rows_for_n = [r for r in rows if r["n"] == n]
-        if not rows_for_n:
-            continue
-
-        seq_ims_rows = [pipeline_view(r, "seq_ims") for r in rows_for_n]
-        seq_ims_path = seq_ims_dir / n / "stats_vs_ms.csv"
-        write_csv(seq_ims_path, seq_ims_rows)
-        saved.append(seq_ims_path)
-
-        ms_rows = [pipeline_view(r, "ms") for r in rows_for_n]
-        ms_path = ms_dir / n / "stats.csv"
-        write_csv(ms_path, ms_rows)
-        saved.append(ms_path)
-
-    # ---- Save: one combined summary.csv (per-n comparison) in outputs/ ----
-    summary_path = outputs_root / "summary.csv"
-    summary_csv_rows = [
-        {"n": s["n"], **rounded_summary(s),
-         "ms_wins": fmt_fraction(s["ms_wins_count"], s["ms_wins_total"]),
-         "ms_ties": fmt_fraction(s["ms_ties_count"], s["ms_wins_total"]),
-         "ms_losses": fmt_fraction(s["ms_losses_count"], s["ms_wins_total"])}
+    inst_csv = [
+        {"n": r["n"], "instance": r["instance"], "bks": r["bks"],
+         "rpd_sats_pct": r["sats_rpd_pct"], "rpd_ims_pct": r["ims_rpd_pct"],
+         "rpd_coop_pct": r["coop_rpd_pct"], "delta_coop_pct": r["delta_coop_pct"],
+         "result": r["coop_result"],
+         "evals_paired_runs": r["evals_paired_runs"],
+         "coop_evals": r["coop_evals"], "ims_evals": r["ims_evals"],
+         "evals_ratio_coop_over_ims": r["evals_ratio"]}
+        for r in rows
+    ]
+    summary_csv = [
+        {"n": s["n"], "avg_rpd_sats_pct": s["avg_rpd_sats_pct"],
+         "avg_rpd_ims_pct": s["avg_rpd_ims_pct"], "avg_rpd_coop_pct": s["avg_rpd_coop_pct"],
+         "avg_delta_coop_pct": s["avg_delta_coop_pct"],
+         "coop_wins": fmt_fraction(s["coop_wins"], s["n_compared"]),
+         "coop_ties": fmt_fraction(s["coop_ties"], s["n_compared"]),
+         "coop_losses": fmt_fraction(s["coop_losses"], s["n_compared"]),
+         "evals_ratio_coop_over_ims": s["evals_ratio"]}
         for s in summary_rows
     ]
-    write_csv(summary_path, summary_csv_rows)
-    saved.append(summary_path)
+
+    saved = []
+    if inst_csv:
+        p = outputs_root / "instances.csv"
+        write_csv(p, inst_csv)
+        saved.append(p)
+    p = outputs_root / "summary.csv"
+    write_csv(p, summary_csv)
+    saved.append(p)
 
     print("\nSaved:")
     for p in saved:

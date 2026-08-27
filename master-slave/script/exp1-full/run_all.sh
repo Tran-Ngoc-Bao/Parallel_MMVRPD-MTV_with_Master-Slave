@@ -26,7 +26,7 @@ JOBS=(
     "100   10"
     "200   35"
     "500   700"
-    "1000  4500"
+    # "1000  4500"
 )
 
 # Usage:
@@ -40,7 +40,7 @@ RUNS="${1:-10}"
 SLEEP_SEC="${2:-0.0}"
 NUM_WORKERS="${3:-7}"
 
-# n=1000 only needs 5 runs; every other n uses the RUNS above (default 10).
+# n=1000 only needs 5 runs; every other n uses the RUNS above.
 RUNS_1000=5
 
 run_stats() {

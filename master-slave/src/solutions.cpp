@@ -1240,7 +1240,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
                 } else if (hooks && hooks->pull_elite) {
                     attempted = true;
                     Solution pulled_elite;
-                    bool pulled = hooks->pull_elite(iteration, result, pulled_elite);
+                    bool pulled = hooks->pull_elite(iteration, result, current, pulled_elite);
                     if (pulled) {
                         if (has_pending_pull && improved_since_pull && hooks->pull_round_improved) {
                             hooks->pull_round_improved();

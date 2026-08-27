@@ -1,6 +1,7 @@
 .claude/
 .vscode/
 .DS_Store
+__pycache__/
 
 build/
 build_test/

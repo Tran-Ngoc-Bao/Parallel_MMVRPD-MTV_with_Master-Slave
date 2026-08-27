@@ -37,7 +37,7 @@ if [ ${#DATA_FILES[@]} -eq 0 ]; then
     exit 1
 fi
 
-OUTPUT_DIR="${OUTPUTS_DIR:-${SCRIPT_DIR}/../../outputs/exp1-full/ms/${DATA_PREFIX}}"
+OUTPUT_DIR="${OUTPUTS_DIR:-${SCRIPT_DIR}/../../outputs/exp1-full/coop/${DATA_PREFIX}}"
 mkdir -p "${OUTPUT_DIR}"
 
 for DATA_FILE in "${DATA_FILES[@]}"; do

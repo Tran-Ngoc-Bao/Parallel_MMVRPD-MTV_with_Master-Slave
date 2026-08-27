@@ -49,7 +49,7 @@ struct Solution {
 
     struct EliteHooks {
         std::function<void(const Solution& elite)> push_elite;
-        std::function<bool(std::size_t iteration, const Solution& personal_best, Solution& pulled_elite)> pull_elite;
+        std::function<bool(std::size_t iteration, const Solution& personal_best, const Solution& current, Solution& pulled_elite)> pull_elite;
         std::function<void(std::size_t total_evaluations)> report_progress;
         // Called once per successful pull whose round (up to the next pull, or
         // search end) improved on the personal best held at pull time.
@@ -75,19 +75,14 @@ struct Solution {
     // "distance 2 solution.pdf" / "pseudocode distance 2 solutions.pdf").
     double td_distance(const Solution& other) const;
 
-    // Asymmetric edge-multiset loss: counts, per undirected consecutive-
-    // customer edge (including each route's closing edge), how much this
-    // solution's occurrence count exceeds `other`'s, summed over edges
-    // where this solution has an excess. Used by the elite pool to find
-    // the existing entry most similar to a candidate for replacement.
+    // Asymmetric edge-multiset loss: sums, per consecutive-customer edge,
+    // how much this solution's occurrence count exceeds `other`'s. Used by
+    // the elite pool to find the existing entry closest to a candidate.
     size_t edge_distance(const Solution& other) const;
 
-    // Canonical fingerprint: equal keys iff solutions agree on realized
-    // truck/drone mode, physical-vehicle grouping, trip composition, and
-    // within-trip visit order -- after quotienting out homogeneous-vehicle
-    // labels and trip presentation order. Ground truth for verifying
-    // td_distance/edge_distance "duplicate" calls (== 0), which are
-    // floating-point and can be off by a hair.
+    // Canonical fingerprint: equal keys iff solutions agree on mode, vehicle
+    // grouping, trip composition, and visit order. Ground truth for
+    // duplicate checks, since td/edge_distance are float and can be off by a hair.
     std::string canonical_structural_key() const;
     bool is_structural_duplicate(const Solution& other) const;
 
