@@ -71,8 +71,7 @@ struct Solution {
     size_t hamming_distance(const Solution& other) const;
 
     // Structural distance in [0,1] combining mode-assignment, physical-vehicle
-    // grouping, trip-partition, and visit-sequence differences (see
-    // "distance 2 solution.pdf" / "pseudocode distance 2 solutions.pdf").
+    // grouping, trip-partition, and visit-sequence differences.
     double td_distance(const Solution& other) const;
 
     // Asymmetric edge-multiset loss: sums, per consecutive-customer edge,

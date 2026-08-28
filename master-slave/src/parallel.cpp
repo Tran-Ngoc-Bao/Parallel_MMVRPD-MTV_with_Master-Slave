@@ -337,11 +337,9 @@ struct ElitePool {
              / (static_cast<double>(m) * static_cast<double>(m - 1));
     }
 
-    // offered = false if no elite in the pool originates from a worker other
-    // than excluded_worker. Otherwise offered = true, and solution is
-    // non-null unless (accept_strategy is Selective and) the picked elite
-    // fails the accept check: quality is judged against the requester's own
-    // personal best, diversity against the requester's current solution.
+    // offered = false if the pool has no elite from another worker. Otherwise
+    // solution is non-null unless Selective accept rejects it (quality vs.
+    // requester's personal best, diversity vs. requester's current solution).
     PickResult pick_for_dispatch(int excluded_worker, std::mt19937& rng, cli::ElitePullStrategy strategy,
                                   cli::ElitePullAcceptStrategy accept_strategy,
                                   const Solution* requester_personal_best,
@@ -522,13 +520,9 @@ Solution run_master(int world_size)
     std::vector<double> diversity_by_checkpoint(9, 0.0);
     std::vector<bool> checkpoint_captured(9, false);
 
-    // Time-based analog of the evaluation checkpoints above: an 8-way split
-    // of the time_limit, timed by the master. The clock does NOT start at t1
-    // (that would count MPI dispatch + each worker's construction); it starts
-    // when the last worker's first elite push arrives -- that push is the
-    // worker's constructed root, sent right as its search begins (MPI keeps
-    // it ahead of any improvement push from the same worker). Checkpoint 0 is
-    // pinned to the best of those roots (best initial solution in the island).
+    // Time-based analog of the checkpoints above: an 8-way split of time_limit,
+    // clocked from the last worker's first elite push (its constructed root)
+    // rather than t1, so MPI dispatch/construction time isn't counted.
     const double time_checkpoint_limit = base_cfg.time_limit;
     std::size_t next_time_checkpoint = 0;
     std::vector<double> best_solution_cost_by_time_checkpoint(9, 0.0);
