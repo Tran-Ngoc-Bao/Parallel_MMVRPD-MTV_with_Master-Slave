@@ -1,30 +1,39 @@
 #!/usr/bin/env python3
 """
-Thong ke so luong evaluations tu cac file JSON ket qua trong
+Summarise evaluation counts from the result JSON files under
 sequence/cpp/outputs/<group>/<customers>/<customers>.<a>.<b>-<run>.json
 
-LUU Y: file ket qua cua run_ims_full.sh la JSON cua worker cho ra nghiem
-tot nhat trong 1 island, nen "total_evaluations" trong do CHI la cua rieng
-worker do. run_ims_full.sh ghi them:
-  - "total_evaluations_all_workers": tong evaluations cong don qua TAT CA
-    worker cua island (day la truong script nay thong ke mac dinh)
-  - "num_workers": so worker da dong gop vao tong tren
-Script nay tinh them cot avg_per_worker = total_evaluations_all_workers /
-num_workers, giong master-slave/script/exp1-full/stat_evaluations.py (chi
-khac o cho lay so worker tu "num_workers" thay vi do dai "worker_seeds").
+NOTE: a run_ims_full.sh result file is the JSON of the worker that
+produced the best solution in one island, so its "total_evaluations" is
+that worker's ALONE. run_ims_full.sh additionally writes:
+  - "total_evaluations_all_workers": evaluations summed over ALL workers
+    of the island
+  - "num_workers": how many workers contributed to that sum
+sats / plain sequential runs have only "total_evaluations" (already the
+full count). So by default (no --field) each file is measured with the
+first field it actually contains, in this order:
+    total_evaluations_all_workers  ->  total_evaluations
+which lets a single run cover ims and sats together. Pass --field to
+force one specific field for every file instead.
 
-Tu dong quet moi thu muc group (vd: ims, sats) va moi bo customers co san
-(100, 200, 500, 1000, ...), nen khi co them du lieu chi can chay lai
-script la ra ket qua moi, khong can sua code.
+This script also computes an avg_per_worker column = <chosen field> /
+num_workers, matching master-slave/script/exp1-full/stat_evaluations.py
+(the only difference: the worker count comes from "num_workers" instead
+of the length of "worker_seeds"). sats rows have no num_workers, so
+their avg_per_worker / workers cells stay blank.
 
-Cach chay:
+Every group directory (e.g. ims, sats) and every available customer set
+(100, 200, 500, 1000, ...) is scanned automatically, so new data only
+needs a re-run of the script -- no code change.
+
+Usage:
     python3 stat_evaluations.py
-    python3 stat_evaluations.py --outputs-dir /duong/dan/khac
-    python3 stat_evaluations.py --groups ims sats --field total_evaluations_all_workers
+    python3 stat_evaluations.py --outputs-dir /other/path
+    python3 stat_evaluations.py --groups ims --field total_evaluations_all_workers
 
-Ket qua:
-    evaluations_by_instance.csv   -> bang du lieu, mo bang Excel/Sheets
-    evaluations_by_instance.txt   -> bang canh cot, de doc truc tiep
+Output:
+    evaluations_by_instance.csv   -> data table, opens in Excel/Sheets
+    evaluations_by_instance.txt   -> column-aligned table, readable as-is
 """
 
 import argparse
@@ -35,13 +44,26 @@ import os
 import re
 import statistics
 
-# ten file dang: <customers>.<a>.<b>-<run>.json  (vd: 500.30.3-7.json)
+# file name pattern: <customers>.<a>.<b>-<run>.json  (e.g. 500.30.3-7.json)
 FILENAME_RE = re.compile(r"^(\d+)\.(\d+\.\d+)-(\d+)\.json$")
+
+# With no --field, each file is measured with the first of these it has.
+FIELD_PREFERENCE = ("total_evaluations_all_workers", "total_evaluations")
+
+
+def resolve_field_value(data, field):
+    """(field_name, value) for one result dict; (None, None) if none apply."""
+    if field is not None:
+        return field, data.get(field)
+    for name in FIELD_PREFERENCE:
+        if data.get(name) is not None:
+            return name, data[name]
+    return None, None
 
 
 def discover_groups(outputs_dir, requested_groups=None):
-    """Tra ve danh sach thu muc con truc tiep duoi outputs_dir la 'group'
-    (vd: ims, sats), tru cac file/thu muc khong lien quan."""
+    """Return the immediate sub-directories of outputs_dir that are 'group'
+    dirs (e.g. ims, sats), skipping unrelated files/dirs."""
     if requested_groups:
         return [g for g in requested_groups if os.path.isdir(os.path.join(outputs_dir, g))]
     groups = []
@@ -53,8 +75,8 @@ def discover_groups(outputs_dir, requested_groups=None):
 
 
 def discover_customers(group_dir):
-    """Tra ve danh sach cac bo customer (ten thu muc con, vd '100','200','500','1000'),
-    sap xep theo gia tri so tang dan."""
+    """Return the customer sets (sub-directory names, e.g. '100','200','500','1000'),
+    sorted by ascending numeric value."""
     customers = []
     for name in os.listdir(group_dir):
         path = os.path.join(group_dir, name)
@@ -69,7 +91,7 @@ def collect_stats(outputs_dir, groups, field):
         group_dir = os.path.join(outputs_dir, group)
         for customers in discover_customers(group_dir):
             cust_dir = os.path.join(group_dir, customers)
-            # gom file json theo nhom instance (vd 10.1 / 20.2 / 30.3 / 40.4)
+            # group json files by instance (e.g. 10.1 / 20.2 / 30.3 / 40.4)
             by_instance = {}
             for fpath in glob.glob(os.path.join(cust_dir, "*.json")):
                 fname = os.path.basename(fpath)
@@ -85,13 +107,15 @@ def collect_stats(outputs_dir, groups, field):
                 vals = []
                 per_worker_vals = []
                 worker_counts = []
+                fields_used = set()
                 for fpath in sorted(by_instance[inst]):
                     with open(fpath) as fh:
                         data = json.load(fh)
-                    v = data.get(field)
+                    fname_used, v = resolve_field_value(data, field)
                     if v is None:
                         continue
                     vals.append(v)
+                    fields_used.add(fname_used)
                     num_workers = data.get("num_workers", 0)
                     if num_workers > 0:
                         per_worker_vals.append(v / num_workers)
@@ -103,6 +127,7 @@ def collect_stats(outputs_dir, groups, field):
                     "customers": customers,
                     "instance": f"{customers}.{inst}",
                     "runs": len(vals),
+                    "field": "/".join(sorted(fields_used)),
                     "avg": statistics.mean(vals),
                     "min": min(vals),
                     "max": max(vals),
@@ -116,13 +141,13 @@ def collect_stats(outputs_dir, groups, field):
 def write_csv(rows, out_path):
     with open(out_path, "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["group", "customers", "instance", "runs",
+        w.writerow(["group", "customers", "instance", "runs", "field",
                     "avg_evaluations", "avg_evaluations_per_worker", "avg_workers",
                     "min_evaluations", "max_evaluations", "sum_evaluations"])
         for r in rows:
             avg_per_worker = f"{r['avg_per_worker']:.2f}" if r["avg_per_worker"] is not None else ""
             avg_workers = f"{r['avg_workers']:.2f}" if r["avg_workers"] is not None else ""
-            w.writerow([r["group"], r["customers"], r["instance"], r["runs"],
+            w.writerow([r["group"], r["customers"], r["instance"], r["runs"], r["field"],
                         f"{r['avg']:.2f}", avg_per_worker, avg_workers,
                         r["min"], r["max"], r["sum"]])
 
@@ -148,8 +173,9 @@ def render_table(rows_data, columns):
 
 def write_txt(rows, out_path, field):
     lines = []
-    lines.append(f"THONG KE SO LUONG {field.upper()} THEO TUNG NHOM INSTANCE")
-    lines.append("(moi nhom instance thuong gom 10 lan chay, gia tri lay tu file JSON ket qua)")
+    title_field = (field or "evaluations").upper()
+    lines.append(f"{title_field} COUNT BY INSTANCE GROUP")
+    lines.append("(each instance group is usually 10 runs; values taken from the result JSON files)")
     lines.append("=" * 94)
     lines.append("")
 
@@ -166,7 +192,7 @@ def write_txt(rows, out_path, field):
 
     groups = sorted(set(r["group"] for r in rows))
     for group in groups:
-        lines.append(f"### Thu muc: {group}")
+        lines.append(f"### Directory: {group}")
         lines.append("")
         customers_list = sorted(set(r["customers"] for r in rows if r["group"] == group), key=int)
         for customers in customers_list:
@@ -208,7 +234,7 @@ def write_txt(rows, out_path, field):
             overall_avg_per_worker_str = (f"{overall_avg_per_worker:,.2f}"
                                            if overall_avg_per_worker is not None else "-")
             total_row = {
-                "instance": "TONG/TB", "runs": str(all_vals_runs),
+                "instance": "TOTAL/AVG", "runs": str(all_vals_runs),
                 "avg": f"{overall_avg:,.2f}", "avg_per_worker": overall_avg_per_worker_str,
                 "workers": "",
                 "min": f"{all_vals_min:,}", "max": f"{all_vals_max:,}", "sum": f"{all_vals_sum:,}",
@@ -216,7 +242,8 @@ def write_txt(rows, out_path, field):
 
             header, rendered_rows = render_table(table_rows + [total_row], columns)
 
-            lines.append(f"-- Bo customer = {customers} --")
+            fields_here = "/".join(sorted({r["field"] for r in sub_rows if r["field"]}))
+            lines.append(f"-- Customer set = {customers}  (field: {fields_here}) --")
             lines.append(header)
             lines.append("-" * len(header))
             lines.extend(rendered_rows[:-1])
@@ -235,22 +262,24 @@ def main():
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "outputs", "exp1-full")
     )
     parser.add_argument("--outputs-dir", default=default_outputs_dir,
-                         help="Duong dan toi thu muc outputs (mac dinh: thu muc chua script nay)")
+                         help="Path to the outputs directory (default: the directory containing this script)")
     parser.add_argument("--groups", nargs="*", default=None,
-                         help="Danh sach thu muc group can thong ke, vd: ims sats (mac dinh: tu dong quet tat ca)")
-    parser.add_argument("--field", default="total_evaluations_all_workers",
-                         help="Ten truong trong JSON can thong ke (mac dinh: total_evaluations_all_workers)")
-    parser.add_argument("--csv-out", default=None, help="Ten file CSV dau ra")
-    parser.add_argument("--txt-out", default=None, help="Ten file TXT dau ra")
+                         help="List of group directories to summarise, e.g. ims sats (default: auto-scan all)")
+    parser.add_argument("--field", default=None,
+                         help="Force one JSON field for every file. Default: per file, "
+                              "total_evaluations_all_workers if present else total_evaluations "
+                              "(so ims + sats are covered by one run).")
+    parser.add_argument("--csv-out", default=None, help="Output CSV file name")
+    parser.add_argument("--txt-out", default=None, help="Output TXT file name")
     args = parser.parse_args()
 
     groups = discover_groups(args.outputs_dir, args.groups)
     if not groups:
-        raise SystemExit(f"Khong tim thay thu muc group nao trong {args.outputs_dir}")
+        raise SystemExit(f"No group directory found in {args.outputs_dir}")
 
     rows = collect_stats(args.outputs_dir, groups, args.field)
     if not rows:
-        raise SystemExit("Khong tim thay du lieu evaluations nao (kiem tra lai ten truong/duong dan).")
+        raise SystemExit("No evaluations data found (check the field name / path).")
 
     csv_out = args.csv_out or os.path.join(args.outputs_dir, "evaluations_by_instance.csv")
     txt_out = args.txt_out or os.path.join(args.outputs_dir, "evaluations_by_instance.txt")
@@ -258,7 +287,8 @@ def main():
     write_csv(rows, csv_out)
     write_txt(rows, txt_out, args.field)
 
-    print(f"Da ghi {len(rows)} dong thong ke vao:")
+    fields_seen = "/".join(sorted({r["field"] for r in rows if r["field"]}))
+    print(f"Wrote {len(rows)} summary rows ({', '.join(groups)}; field: {fields_seen}) to:")
     print(f"  - {csv_out}")
     print(f"  - {txt_out}")
 

@@ -1,27 +1,28 @@
 #!/usr/bin/env python3
 """
-Thong ke so luong evaluations (total_evaluations) tu cac file JSON ket qua
-trong outputs/<group>/<customers>/<customers>.<a>.<b>-<run>.json
+Summarise evaluation counts (total_evaluations) from the result JSON
+files under outputs/<group>/<customers>/<customers>.<a>.<b>-<run>.json
 
-LUU Y: total_evaluations trong JSON cua master-slave la tong cong don cua
-TOAN BO chuong trinh (cong don qua tat ca cac worker slave chay song song
-trong RUNS giay time_limit do), khong phai cua rieng 1 worker. Script nay
-vi vay tinh them cot avg_per_worker = total_evaluations / so worker, voi
-so worker cua tung run lay tu do dai mang "worker_seeds" trong chinh file
-JSON do (moi worker slave co 1 phan tu trong "worker_seeds").
+NOTE: master-slave's total_evaluations in the JSON is the WHOLE-program
+running total (summed over every slave worker running in parallel during
+the RUNS-second time_limit), not any single worker's. This script
+therefore also computes an avg_per_worker column = total_evaluations /
+worker count, where the worker count for each run comes from the length
+of the "worker_seeds" array in that same JSON file (every slave worker
+has one entry in "worker_seeds").
 
-Tu dong quet moi thu muc group (vd: coop) va moi bo customers co san
-(100, 200, 500, 1000, ...), nen khi co them du lieu customer 1000 chi can
-chay lai script la ra ket qua moi, khong can sua code.
+Every group directory (e.g. coop) and every available customer set
+(100, 200, 500, 1000, ...) is scanned automatically, so adding customer
+1000 data only needs a re-run of the script -- no code change.
 
-Cach chay:
+Usage:
     python3 stat_evaluations.py
-    python3 stat_evaluations.py --outputs-dir /duong/dan/khac
+    python3 stat_evaluations.py --outputs-dir /other/path
     python3 stat_evaluations.py --groups coop --field total_evaluations
 
-Ket qua:
-    evaluations_by_instance.csv   -> bang du lieu, mo bang Excel/Sheets
-    evaluations_by_instance.txt   -> bang canh cot, de doc truc tiep
+Output:
+    evaluations_by_instance.csv   -> data table, opens in Excel/Sheets
+    evaluations_by_instance.txt   -> column-aligned table, readable as-is
 """
 
 import argparse
@@ -37,8 +38,8 @@ FILENAME_RE = re.compile(r"^(\d+)\.(\d+\.\d+)-(\d+)\.json$")
 
 
 def discover_groups(outputs_dir, requested_groups=None):
-    """Tra ve danh sach thu muc con truc tiep duoi outputs_dir la 'group'
-    (vd: ims, sats), tru cac file/thu muc khong lien quan."""
+    """Return the immediate sub-directories of outputs_dir that are 'group'
+    dirs (e.g. ims, sats), skipping unrelated files/dirs."""
     if requested_groups:
         return [g for g in requested_groups if os.path.isdir(os.path.join(outputs_dir, g))]
     groups = []
@@ -50,8 +51,8 @@ def discover_groups(outputs_dir, requested_groups=None):
 
 
 def discover_customers(group_dir):
-    """Tra ve danh sach cac bo customer (ten thu muc con, vd '100','200','500','1000'),
-    sap xep theo gia tri so tang dan."""
+    """Return the customer sets (sub-directory names, e.g. '100','200','500','1000'),
+    sorted by ascending numeric value."""
     customers = []
     for name in os.listdir(group_dir):
         path = os.path.join(group_dir, name)
@@ -145,8 +146,8 @@ def render_table(rows_data, columns):
 
 def write_txt(rows, out_path, field):
     lines = []
-    lines.append(f"THONG KE SO LUONG {field.upper()} THEO TUNG NHOM INSTANCE")
-    lines.append("(moi nhom instance thuong gom 10 lan chay, gia tri lay tu file JSON ket qua)")
+    lines.append(f"{field.upper()} COUNT BY INSTANCE GROUP")
+    lines.append("(each instance group is usually 10 runs; values taken from the result JSON files)")
     lines.append("=" * 94)
     lines.append("")
 
@@ -205,7 +206,7 @@ def write_txt(rows, out_path, field):
             overall_avg_per_worker_str = (f"{overall_avg_per_worker:,.2f}"
                                            if overall_avg_per_worker is not None else "-")
             total_row = {
-                "instance": "TONG/TB", "runs": str(all_vals_runs),
+                "instance": "TOTAL/AVG", "runs": str(all_vals_runs),
                 "avg": f"{overall_avg:,.2f}", "avg_per_worker": overall_avg_per_worker_str,
                 "workers": "",
                 "min": f"{all_vals_min:,}", "max": f"{all_vals_max:,}", "sum": f"{all_vals_sum:,}",
@@ -213,7 +214,7 @@ def write_txt(rows, out_path, field):
 
             header, rendered_rows = render_table(table_rows + [total_row], columns)
 
-            lines.append(f"-- Bo customer = {customers} --")
+            lines.append(f"-- Customer set = {customers} --")
             lines.append(header)
             lines.append("-" * len(header))
             lines.extend(rendered_rows[:-1])
@@ -232,22 +233,22 @@ def main():
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "outputs", "exp1-full")
     )
     parser.add_argument("--outputs-dir", default=default_outputs_dir,
-                         help="Duong dan toi thu muc outputs (mac dinh: thu muc chua script nay)")
+                         help="Path to the outputs directory (default: the directory containing this script)")
     parser.add_argument("--groups", nargs="*", default=None,
-                         help="Danh sach thu muc group can thong ke, vd: ims sats (mac dinh: tu dong quet tat ca)")
+                         help="List of group directories to summarise, e.g. ims sats (default: auto-scan all)")
     parser.add_argument("--field", default="total_evaluations",
-                         help="Ten truong trong JSON can thong ke (mac dinh: total_evaluations)")
-    parser.add_argument("--csv-out", default=None, help="Ten file CSV dau ra")
-    parser.add_argument("--txt-out", default=None, help="Ten file TXT dau ra")
+                         help="JSON field name to summarise (default: total_evaluations)")
+    parser.add_argument("--csv-out", default=None, help="Output CSV file name")
+    parser.add_argument("--txt-out", default=None, help="Output TXT file name")
     args = parser.parse_args()
 
     groups = discover_groups(args.outputs_dir, args.groups)
     if not groups:
-        raise SystemExit(f"Khong tim thay thu muc group nao trong {args.outputs_dir}")
+        raise SystemExit(f"No group directory found in {args.outputs_dir}")
 
     rows = collect_stats(args.outputs_dir, groups, args.field)
     if not rows:
-        raise SystemExit("Khong tim thay du lieu evaluations nao (kiem tra lai ten truong/duong dan).")
+        raise SystemExit("No evaluations data found (check the field name / path).")
 
     csv_out = args.csv_out or os.path.join(args.outputs_dir, "evaluations_by_instance.csv")
     txt_out = args.txt_out or os.path.join(args.outputs_dir, "evaluations_by_instance.txt")
@@ -255,7 +256,7 @@ def main():
     write_csv(rows, csv_out)
     write_txt(rows, txt_out, args.field)
 
-    print(f"Da ghi {len(rows)} dong thong ke vao:")
+    print(f"Wrote {len(rows)} summary rows to:")
     print(f"  - {csv_out}")
     print(f"  - {txt_out}")
 
