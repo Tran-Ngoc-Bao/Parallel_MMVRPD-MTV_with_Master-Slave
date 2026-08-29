@@ -26,6 +26,9 @@ Source:
     ims  : <seq-ims-outputs>/<n>/<n>.<combo>-<run>.json
     bks  : <bks>/<n>/<n>.<combo>-bks.json
 
+Two files are written side by side: the CSV and an .xlsx with the same
+rows (the .xlsx step is skipped with a warning if openpyxl is missing).
+
 Usage:
     python3 stat_runs.py
     python3 stat_runs.py --customers 500,1000 -o /path/to/runs.csv
@@ -45,6 +48,10 @@ IMS_EVALS_FIELD = "total_evaluations_all_workers"
 
 COLUMNS = ["instance", "n", "set", "Tn", "run", "seed", "bks",
            "ims-final", "coop-final", "ims-evals", "coop-evals"]
+
+# Columns written as numbers (not text) in the .xlsx.
+NUMERIC_COLUMNS = {"n", "Tn", "run", "seed", "bks", "ims-final", "coop-final",
+                   "ims-evals", "coop-evals"}
 
 RUNFILE_RE = re.compile(r"^(\d+)\.(.+)-(\d+)\.json$")
 
@@ -149,6 +156,29 @@ def write_csv(rows, out_path: Path):
             writer.writerow(["" if r[c] is None else r[c] for c in COLUMNS])
 
 
+def write_xlsx(rows, out_path: Path):
+    """Same rows as the CSV, but numeric cells stay numeric. Needs openpyxl."""
+    try:
+        from openpyxl import Workbook
+    except ImportError:
+        print("  bo qua .xlsx: thieu openpyxl (pip install --user openpyxl)",
+              file=sys.stderr)
+        return None
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "runs"
+    ws.append(COLUMNS)
+    for r in rows:
+        ws.append([r[c] if c in NUMERIC_COLUMNS else
+                   ("" if r[c] is None else r[c])
+                   for c in COLUMNS])
+    ws.freeze_panes = "A2"
+    wb.save(out_path)
+    return out_path
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -188,9 +218,12 @@ def main():
         sys.exit(1)
 
     write_csv(rows, out_path)
+    xlsx_path = write_xlsx(rows, out_path.with_suffix(".xlsx"))
 
     n_inst = len({r["instance"] for r in rows})
     print(f"Da ghi {len(rows)} dong ({n_inst} instance) vao {out_path}")
+    if xlsx_path is not None:
+        print(f"  va vao {xlsx_path}")
     both = sum(1 for r in rows if r["ims-final"] is not None and r["coop-final"] is not None)
     print(f"  co ca ims va coop: {both} dong")
     if missing_ims_evals:

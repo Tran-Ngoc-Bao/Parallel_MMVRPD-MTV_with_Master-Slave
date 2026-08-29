@@ -46,14 +46,14 @@ import re
 import sys
 from pathlib import Path
 
-# ten file ket qua: <customers>.<combo>-<run>.json  (vd: 1000.30.2-7.json)
+# result file name: <customers>.<combo>-<run>.json  (e.g. 1000.30.2-7.json)
 FILENAME_RE = re.compile(r"^(\d+)\.(.+)-(\d+)\.json$")
 
 # preferred field, then fallback
 CHECKPOINT_FIELDS = ("best_solution_cost_by_time_checkpoint_all_workers",
                      "best_solution_cost_by_time_checkpoint")
 
-# Cac instance bi loai khoi thong ke (dung "<customers>.<combo>").
+# Instances excluded from the stats (keyed by "<customers>.<combo>").
 EXCLUDED_INSTANCES = {"200.10.2", "200.40.1", "500.10.2", "500.40.1"}
 
 SCRIPT_DIR = Path(__file__).resolve().parent

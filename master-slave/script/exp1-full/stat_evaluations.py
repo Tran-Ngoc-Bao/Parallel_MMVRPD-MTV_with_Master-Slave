@@ -32,7 +32,7 @@ import os
 import re
 import statistics
 
-# ten file dang: <customers>.<a>.<b>-<run>.json  (vd: 500.30.3-7.json)
+# file name pattern: <customers>.<a>.<b>-<run>.json  (e.g. 500.30.3-7.json)
 FILENAME_RE = re.compile(r"^(\d+)\.(\d+\.\d+)-(\d+)\.json$")
 
 
@@ -66,7 +66,7 @@ def collect_stats(outputs_dir, groups, field):
         group_dir = os.path.join(outputs_dir, group)
         for customers in discover_customers(group_dir):
             cust_dir = os.path.join(group_dir, customers)
-            # gom file json theo nhom instance (vd 10.1 / 20.2 / 30.3 / 40.4)
+            # group json files by instance (e.g. 10.1 / 20.2 / 30.3 / 40.4)
             by_instance = {}
             for fpath in glob.glob(os.path.join(cust_dir, "*.json")):
                 fname = os.path.basename(fpath)
@@ -163,7 +163,7 @@ def write_txt(rows, out_path, field):
 
     groups = sorted(set(r["group"] for r in rows))
     for group in groups:
-        lines.append(f"### Thu muc: {group}")
+        lines.append(f"### Directory: {group}")
         lines.append("")
         customers_list = sorted(set(r["customers"] for r in rows if r["group"] == group), key=int)
         for customers in customers_list:
