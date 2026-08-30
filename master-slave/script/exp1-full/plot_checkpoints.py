@@ -70,7 +70,7 @@ def load_rpd_rows(csv_path, wanted_methods, wanted_customers):
         needed = {"instance", "customers", "run", "method", "checkpoint", "BestCost", "BKS"}
         missing_cols = needed - set(reader.fieldnames or [])
         if missing_cols:
-            sys.exit(f"loi: file {csv_path} thieu cot {sorted(missing_cols)}")
+            sys.exit(f"error: file {csv_path} is missing column(s) {sorted(missing_cols)}")
         for row in reader:
             n_total += 1
             method = row["method"]
@@ -137,33 +137,33 @@ def dump_csv(path, curve, checkpoints, denom):
                 continue
             for cp in checkpoints:
                 w.writerow([method, cp, f"{cp}/{denom}", curve[method].get(cp, "")])
-    print(f"Da ghi bang tong hop vao {path}")
+    print(f"Wrote the aggregated table to {path}")
 
 
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--in", dest="in_path", default=str(DEFAULT_IN),
-                    help=f"File checkpoint_curves.csv dau vao (mac dinh: {DEFAULT_IN})")
+                    help=f"Input checkpoint_curves.csv file (default: {DEFAULT_IN})")
     ap.add_argument("-o", "--out", default=None,
-                    help="File anh dau ra (mac dinh: <thu muc cua --in>/checkpoint_curves.png)")
+                    help="Output image file (default: <dir of --in>/checkpoint_curves.png)")
     ap.add_argument("--methods", nargs="+", default=None, choices=METHOD_ORDER,
-                    help="Chi ve cac method nay (mac dinh: tat ca method co trong CSV)")
+                    help="Only plot these methods (default: every method present in the CSV)")
     ap.add_argument("--customers", default=None,
-                    help="Loc theo co nhom khach, ngan cach bang dau phay (vd: 200,500). "
-                         "Mac dinh: tat ca.")
+                    help="Filter by customer set, comma-separated (e.g. 200,500). "
+                         "Default: all.")
     ap.add_argument("--dump-csv", default=None,
-                    help="Ghi them bang RPD trung binh (method x checkpoint) ra file CSV nay")
-    ap.add_argument("--dpi", type=int, default=150, help="DPI cua anh xuat ra (mac dinh: 150)")
+                    help="Also write the mean-RPD table (method x checkpoint) to this CSV file")
+    ap.add_argument("--dpi", type=int, default=150, help="DPI of the output image (default: 150)")
     ap.add_argument("--ylim", default=None,
-                    help="Gioi han truc tung 'min,max' de phong to (vd: -1,3). "
-                         "Checkpoint 0/8 thuong rat lon lam bep phan con lai.")
-    ap.add_argument("--show", action="store_true", help="Mo cua so hien thi do thi")
+                    help="y-axis limits 'min,max' to zoom in (e.g. -1,3). "
+                         "Checkpoint 0/8 is usually huge and flattens the rest.")
+    ap.add_argument("--show", action="store_true", help="Open a window to display the plot")
     args = ap.parse_args()
 
     csv_path = Path(args.in_path).resolve()
     if not csv_path.is_file():
-        sys.exit(f"loi: khong tim thay {csv_path}")
+        sys.exit(f"error: not found: {csv_path}")
 
     wanted_methods = set(args.methods) if args.methods else None
     wanted_customers = ({c.strip() for c in args.customers.split(",") if c.strip()}
@@ -171,25 +171,25 @@ def main():
 
     rpd_rows, stats = load_rpd_rows(csv_path, wanted_methods, wanted_customers)
     if not rpd_rows:
-        sys.exit("loi: khong co dong hop le nao sau khi loc (thieu BKS het?)")
+        sys.exit("error: no valid rows left after filtering (BKS missing everywhere?)")
 
     curve, checkpoints = aggregate(rpd_rows)
     denom = max(checkpoints) if checkpoints else 8
     methods_present = [m for m in METHOD_ORDER if m in curve]
 
     # Print a short summary to stdout
-    print(f"Doc {stats['total']} dong tu {csv_path}")
+    print(f"Read {stats['total']} rows from {csv_path}")
     if stats["no_bks"]:
-        print(f"  bo qua {stats['no_bks']} dong khong co BKS")
+        print(f"  skipped {stats['no_bks']} rows with no BKS")
     if stats["bad_bks"]:
-        print(f"  bo qua {stats['bad_bks']} dong BKS khong hop le")
+        print(f"  skipped {stats['bad_bks']} rows with an invalid BKS")
     n_by = defaultdict(lambda: [set(), set(), set()])
     for method, customers, instance, run, _cp, _rpd in rpd_rows:
         s = n_by[method]
         s[0].add(customers); s[1].add((customers, instance)); s[2].add((customers, instance, run))
     for method in methods_present:
         s = n_by[method]
-        print(f"  {method}: {len(s[0])} co khach, {len(s[1])} instance, {len(s[2])} run")
+        print(f"  {method}: {len(s[0])} customer sets, {len(s[1])} instances, {len(s[2])} runs")
         print("    " + "  ".join(f"{cp}/{denom}={curve[method][cp]:+.3f}%" for cp in checkpoints))
 
     if args.dump_csv:
@@ -201,8 +201,8 @@ def main():
             matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
-        sys.exit("loi: can matplotlib de ve do thi -- cai bang:  python3 -m pip install --user matplotlib\n"
-                 "     (van co the dung --dump-csv de xuat bang so lieu ma khong can matplotlib)")
+        sys.exit("error: matplotlib is required to plot -- install with:  python3 -m pip install --user matplotlib\n"
+                 "     (you can still use --dump-csv to export the numbers without matplotlib)")
 
     ylim = None
     if args.ylim:
@@ -210,7 +210,7 @@ def main():
             lo, hi = (float(x) for x in args.ylim.split(","))
             ylim = (lo, hi)
         except ValueError:
-            sys.exit("loi: --ylim phai co dang 'min,max' (vd: -1,3)")
+            sys.exit("error: --ylim must have the form 'min,max' (e.g. -1,3)")
 
     def render(cps, out_path):
         xs = [cp / denom for cp in cps]
@@ -229,7 +229,7 @@ def main():
         ax.legend()
         fig.tight_layout()
         fig.savefig(out_path, dpi=args.dpi)
-        print(f"Da luu do thi vao {out_path}")
+        print(f"Saved the plot to {out_path}")
 
     base = (Path(args.out).resolve() if args.out
             else csv_path.with_name("checkpoint_curves.png"))

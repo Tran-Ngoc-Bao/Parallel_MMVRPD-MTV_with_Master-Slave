@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-Thong ke so luong evaluations (total_evaluations) tu cac file JSON ket qua
-trong sequence/cpp/outputs/<group>/<customers>/<customers>.<a>.<b>-<run>.json
+Summarise evaluation counts (total_evaluations) from the result JSON
+files under sequence/cpp/outputs/<group>/<customers>/<customers>.<a>.<b>-<run>.json
 
-Tu dong quet moi thu muc group (vd: ims, sats) va moi bo customers co san
-(100, 200, 500, 1000, ...), nen khi co them du lieu customer 1000 chi can
-chay lai script la ra ket qua moi, khong can sua code.
+Every group directory (e.g. ims, sats) and every available customer set
+(100, 200, 500, 1000, ...) is scanned automatically, so new customer-1000
+data only needs a re-run of the script -- no code change.
 
-Cach chay:
+Usage:
     python3 stat_evaluations.py
-    python3 stat_evaluations.py --outputs-dir /duong/dan/khac
+    python3 stat_evaluations.py --outputs-dir /other/path
     python3 stat_evaluations.py --groups ims sats --field total_evaluations
 
-Ket qua:
-    evaluations_by_instance.csv   -> bang du lieu, mo bang Excel/Sheets
-    evaluations_by_instance.txt   -> bang canh cot, de doc truc tiep
+Output:
+    evaluations_by_instance.csv   -> data table, opens in Excel/Sheets
+    evaluations_by_instance.txt   -> column-aligned table, readable as-is
 """
 
 import argparse
@@ -25,13 +25,13 @@ import os
 import re
 import statistics
 
-# ten file dang: <customers>.<a>.<b>-<run>.json  (vd: 500.30.3-7.json)
+# file name pattern: <customers>.<a>.<b>-<run>.json  (e.g. 500.30.3-7.json)
 FILENAME_RE = re.compile(r"^(\d+)\.(\d+\.\d+)-(\d+)\.json$")
 
 
 def discover_groups(outputs_dir, requested_groups=None):
-    """Tra ve danh sach thu muc con truc tiep duoi outputs_dir la 'group'
-    (vd: ims, sats), tru cac file/thu muc khong lien quan."""
+    """Return the immediate sub-directories of outputs_dir that are 'group'
+    dirs (e.g. ims, sats), skipping unrelated files/dirs."""
     if requested_groups:
         return [g for g in requested_groups if os.path.isdir(os.path.join(outputs_dir, g))]
     groups = []
@@ -43,8 +43,8 @@ def discover_groups(outputs_dir, requested_groups=None):
 
 
 def discover_customers(group_dir):
-    """Tra ve danh sach cac bo customer (ten thu muc con, vd '100','200','500','1000'),
-    sap xep theo gia tri so tang dan."""
+    """Return the customer sets (sub-directory names, e.g. '100','200','500','1000'),
+    sorted by ascending numeric value."""
     customers = []
     for name in os.listdir(group_dir):
         path = os.path.join(group_dir, name)
@@ -59,7 +59,7 @@ def collect_stats(outputs_dir, groups, field):
         group_dir = os.path.join(outputs_dir, group)
         for customers in discover_customers(group_dir):
             cust_dir = os.path.join(group_dir, customers)
-            # gom file json theo nhom instance (vd 10.1 / 20.2 / 30.3 / 40.4)
+            # group json files by instance (e.g. 10.1 / 20.2 / 30.3 / 40.4)
             by_instance = {}
             for fpath in glob.glob(os.path.join(cust_dir, "*.json")):
                 fname = os.path.basename(fpath)
@@ -106,20 +106,20 @@ def write_csv(rows, out_path):
 
 def write_txt(rows, out_path, field):
     lines = []
-    lines.append(f"THONG KE SO LUONG {field.upper()} THEO TUNG NHOM INSTANCE")
-    lines.append("(moi nhom instance thuong gom 10 lan chay, gia tri lay tu file JSON ket qua)")
+    lines.append(f"{field.upper()} COUNT BY INSTANCE GROUP")
+    lines.append("(each instance group is usually 10 runs; values taken from the result JSON files)")
     lines.append("=" * 94)
     lines.append("")
 
     groups = sorted(set(r["group"] for r in rows))
     for group in groups:
-        lines.append(f"### Thu muc: {group}")
+        lines.append(f"### Directory: {group}")
         lines.append("")
         customers_list = sorted(set(r["customers"] for r in rows if r["group"] == group), key=int)
         for customers in customers_list:
             sub_rows = [r for r in rows if r["group"] == group and r["customers"] == customers]
             header = f"{'Instance':<12}{'Runs':>6}{'Avg':>20}{'Min':>16}{'Max':>16}{'Sum':>20}"
-            lines.append(f"-- Bo customer = {customers} --")
+            lines.append(f"-- Customer set = {customers} --")
             lines.append(header)
             lines.append("-" * len(header))
             all_vals_sum = 0
@@ -141,7 +141,7 @@ def write_txt(rows, out_path, field):
                 lines.append("-" * len(header))
                 overall_avg = weighted_avg_num / all_vals_runs if all_vals_runs else 0
                 lines.append(
-                    f"{'TONG/TB':<12}{all_vals_runs:>6}{overall_avg:>20,.2f}"
+                    f"{'TOTAL/AVG':<12}{all_vals_runs:>6}{overall_avg:>20,.2f}"
                     f"{all_vals_min:>16,}{all_vals_max:>16,}{all_vals_sum:>20,}"
                 )
             lines.append("")
@@ -157,22 +157,22 @@ def main():
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "outputs", "exp1")
     )
     parser.add_argument("--outputs-dir", default=default_outputs_dir,
-                         help="Duong dan toi thu muc outputs (mac dinh: thu muc chua script nay)")
+                         help="Path to the outputs directory (default: the directory containing this script)")
     parser.add_argument("--groups", nargs="*", default=None,
-                         help="Danh sach thu muc group can thong ke, vd: ims sats (mac dinh: tu dong quet tat ca)")
+                         help="List of group directories to summarise, e.g. ims sats (default: auto-scan all)")
     parser.add_argument("--field", default="total_evaluations",
-                         help="Ten truong trong JSON can thong ke (mac dinh: total_evaluations)")
-    parser.add_argument("--csv-out", default=None, help="Ten file CSV dau ra")
-    parser.add_argument("--txt-out", default=None, help="Ten file TXT dau ra")
+                         help="JSON field name to summarise (default: total_evaluations)")
+    parser.add_argument("--csv-out", default=None, help="Output CSV file name")
+    parser.add_argument("--txt-out", default=None, help="Output TXT file name")
     args = parser.parse_args()
 
     groups = discover_groups(args.outputs_dir, args.groups)
     if not groups:
-        raise SystemExit(f"Khong tim thay thu muc group nao trong {args.outputs_dir}")
+        raise SystemExit(f"No group directory found in {args.outputs_dir}")
 
     rows = collect_stats(args.outputs_dir, groups, args.field)
     if not rows:
-        raise SystemExit("Khong tim thay du lieu evaluations nao (kiem tra lai ten truong/duong dan).")
+        raise SystemExit("No evaluations data found (check the field name / path).")
 
     csv_out = args.csv_out or os.path.join(args.outputs_dir, "evaluations_by_instance.csv")
     txt_out = args.txt_out or os.path.join(args.outputs_dir, "evaluations_by_instance.txt")
@@ -180,7 +180,7 @@ def main():
     write_csv(rows, csv_out)
     write_txt(rows, txt_out, args.field)
 
-    print(f"Da ghi {len(rows)} dong thong ke vao:")
+    print(f"Wrote {len(rows)} summary rows to:")
     print(f"  - {csv_out}")
     print(f"  - {txt_out}")
 

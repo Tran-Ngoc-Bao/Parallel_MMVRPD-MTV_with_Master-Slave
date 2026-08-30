@@ -161,7 +161,7 @@ def write_xlsx(rows, out_path: Path):
     try:
         from openpyxl import Workbook
     except ImportError:
-        print("  bo qua .xlsx: thieu openpyxl (pip install --user openpyxl)",
+        print("  skipping .xlsx: openpyxl not installed (pip install --user openpyxl)",
               file=sys.stderr)
         return None
 
@@ -186,21 +186,21 @@ def main():
     ap.add_argument("--coop-outputs",
                     default=str(script_dir / ".." / ".." / "outputs" / "exp1-full" / "coop"),
                     help="master-slave run_full.sh output dir "
-                         "(mac dinh: ../../outputs/exp1-full/coop)")
+                         "(default: ../../outputs/exp1-full/coop)")
     ap.add_argument("--seq-ims-outputs",
                     default=str(script_dir / ".." / ".." / ".." / "sequence" / "cpp"
                                / "outputs" / "exp1-full" / "ims"),
                     help="sequence/cpp run_ims_full.sh output dir "
-                         "(mac dinh: ../../../sequence/cpp/outputs/exp1-full/ims)")
+                         "(default: ../../../sequence/cpp/outputs/exp1-full/ims)")
     ap.add_argument("--bks", default=str(script_dir / ".." / ".." / ".." / "bks"),
-                    help="Thu muc BKS (mac dinh: ../../../bks)")
+                    help="BKS directory (default: ../../../bks)")
     ap.add_argument("--customers", default=None,
-                    help="Loc theo bo customer, ngan cach dau phay (vd: 500,1000)")
+                    help="Filter by customer set, comma-separated (e.g. 500,1000)")
     ap.add_argument("--tuning", default=",".join(sorted(TUNING_INSTANCES)),
-                    help="Cac instance thuoc set 'tuning', ngan cach dau phay "
-                         f"(mac dinh: {','.join(sorted(TUNING_INSTANCES))})")
+                    help="Instances in the 'tuning' set, comma-separated "
+                         f"(default: {','.join(sorted(TUNING_INSTANCES))})")
     ap.add_argument("-o", "--out", default=None,
-                    help="File .csv dau ra (mac dinh: <coop-outputs>/../runs.csv)")
+                    help="Output .csv file (default: <coop-outputs>/../runs.csv)")
     args = ap.parse_args()
 
     coop_dir = Path(args.coop_outputs).resolve()
@@ -214,21 +214,21 @@ def main():
 
     rows, missing_ims_evals = collect_rows(coop_dir, ims_dir, bks_dir, wanted, tuning)
     if not rows:
-        print("Khong tim thay run nao (kiem tra lai duong dan).", file=sys.stderr)
+        print("No run found (check the paths).", file=sys.stderr)
         sys.exit(1)
 
     write_csv(rows, out_path)
     xlsx_path = write_xlsx(rows, out_path.with_suffix(".xlsx"))
 
     n_inst = len({r["instance"] for r in rows})
-    print(f"Da ghi {len(rows)} dong ({n_inst} instance) vao {out_path}")
+    print(f"Wrote {len(rows)} rows ({n_inst} instances) to {out_path}")
     if xlsx_path is not None:
-        print(f"  va vao {xlsx_path}")
+        print(f"  and to {xlsx_path}")
     both = sum(1 for r in rows if r["ims-final"] is not None and r["coop-final"] is not None)
-    print(f"  co ca ims va coop: {both} dong")
+    print(f"  have both ims and coop: {both} rows")
     if missing_ims_evals:
-        print(f"  {missing_ims_evals} run ims thieu '{IMS_EVALS_FIELD}' "
-              f"(cot ims-evals de trong)")
+        print(f"  {missing_ims_evals} ims run(s) missing '{IMS_EVALS_FIELD}' "
+              f"(ims-evals column left blank)")
 
 
 if __name__ == "__main__":

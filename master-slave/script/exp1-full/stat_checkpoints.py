@@ -90,7 +90,7 @@ def collect_rows(sources, bks_dir: Path, wanted_customers, excluded_instances):
 
     for method, method_dir in sources:
         if not method_dir.is_dir():
-            print(f"warning: khong thay thu muc {method_dir}", file=sys.stderr)
+            print(f"warning: directory not found: {method_dir}", file=sys.stderr)
             continue
 
         for n in discover_customers(method_dir):
@@ -154,27 +154,27 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sequence-outputs-dir",
                     default=str(DEFAULT_SEQUENCE_OUTPUTS),
-                    help="Thu muc outputs/exp1-full cua sequence/cpp, chua ims/ va sats/ "
-                         f"(mac dinh: {DEFAULT_SEQUENCE_OUTPUTS})")
+                    help="sequence/cpp's outputs/exp1-full directory, containing ims/ and sats/ "
+                         f"(default: {DEFAULT_SEQUENCE_OUTPUTS})")
     ap.add_argument("--master-slave-outputs-dir",
                     default=str(DEFAULT_MASTER_SLAVE_OUTPUTS),
-                    help="Thu muc outputs/exp1-full cua master-slave, chua coop/ "
-                         f"(mac dinh: {DEFAULT_MASTER_SLAVE_OUTPUTS})")
+                    help="master-slave's outputs/exp1-full directory, containing coop/ "
+                         f"(default: {DEFAULT_MASTER_SLAVE_OUTPUTS})")
     ap.add_argument("--bks", default=str(SCRIPT_DIR / ".." / ".." / ".." / "bks"),
-                    help="Thu muc chua file BKS, dung chung cho ca hai pipeline "
-                         "(mac dinh: ../../../bks)")
+                    help="Directory holding the BKS files, shared by both pipelines "
+                         "(default: ../../../bks)")
     ap.add_argument("--methods", nargs="+", default=None, choices=ALL_METHODS,
-                    help=f"Cac method can gom (mac dinh: ca {', '.join(ALL_METHODS)})")
+                    help=f"Methods to include (default: all of {', '.join(ALL_METHODS)})")
     ap.add_argument("--customers", default=None,
-                    help="Loc theo bo customer, ngan cach bang dau phay "
-                         "(vd: 500,1000). Mac dinh: tat ca.")
+                    help="Filter by customer set, comma-separated "
+                         "(e.g. 500,1000). Default: all.")
     ap.add_argument("-o", "--out", default=None,
-                    help="File CSV dau ra (mac dinh: "
+                    help="Output CSV file (default: "
                          "<master-slave-outputs-dir>/checkpoint_curves.csv)")
     ap.add_argument("--exclude", default=",".join(sorted(EXCLUDED_INSTANCES)),
-                    help="Cac instance bo qua, ngan cach bang dau phay "
-                         f"(mac dinh: {','.join(sorted(EXCLUDED_INSTANCES))}). "
-                         "Dat rong de khong bo instance nao.")
+                    help="Instances to skip, comma-separated "
+                         f"(default: {','.join(sorted(EXCLUDED_INSTANCES))}). "
+                         "Set empty to skip no instance.")
     args = ap.parse_args()
 
     sequence_outputs = Path(args.sequence_outputs_dir).resolve()
@@ -202,22 +202,22 @@ def main():
         writer.writerows(rows)
 
     n_runs = len({(r["method"], r["customers"], r["instance"], r["run"]) for r in rows})
-    print(f"Da ghi {len(rows)} dong ({n_runs} run) vao {out_path}")
+    print(f"Wrote {len(rows)} rows ({n_runs} runs) to {out_path}")
     by_method = {}
     for r in rows:
         by_method[r["method"]] = by_method.get(r["method"], 0) + 1
     for method, cnt in sorted(by_method.items()):
-        print(f"  {method}: {cnt} dong")
+        print(f"  {method}: {cnt} rows")
     if stats["skipped_no_field"]:
-        print(f"  bo qua {stats['skipped_no_field']} file khong co chuoi checkpoint nao "
-              f"(chay khong co --time-limit?)")
+        print(f"  skipped {stats['skipped_no_field']} file(s) with no checkpoint series "
+              f"(run without --time-limit?)")
     if stats["skipped_bad_name"]:
-        print(f"  bo qua {stats['skipped_bad_name']} file sai dinh dang ten")
+        print(f"  skipped {stats['skipped_bad_name']} file(s) with a malformed name")
     if stats["skipped_excluded"]:
-        print(f"  bo qua {stats['skipped_excluded']} file thuoc instance bi loai "
+        print(f"  skipped {stats['skipped_excluded']} file(s) belonging to an excluded instance "
               f"({', '.join(sorted(excluded_instances))})")
     if stats["missing_bks"]:
-        print(f"  thieu BKS cho: {', '.join(stats['missing_bks'])}")
+        print(f"  missing BKS for: {', '.join(stats['missing_bks'])}")
 
 
 if __name__ == "__main__":
