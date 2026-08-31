@@ -52,5 +52,6 @@ struct Logger {
                   std::size_t pull_round_improved_count = 0,
                   const std::vector<std::size_t>& worker_pull_round_improved_counts = {},
                   const std::vector<double>& best_solution_cost_by_time_checkpoint = {},
-                  double time_checkpoint_limit = 0.0);
+                  double time_checkpoint_limit = 0.0,
+                  std::size_t total_search_iterations = 0);
 };

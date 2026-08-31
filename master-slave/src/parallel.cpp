@@ -176,22 +176,24 @@ void wait_all_pending_sends(std::list<PendingSend>& pending)
 }
 
 void send_stats(int dest, std::size_t total_evaluations, std::size_t push_count,
-                 std::size_t pull_round_improved_count)
+                 std::size_t pull_round_improved_count, std::size_t iterations)
 {
     nlohmann::json j;
     j["total_evaluations"]        = total_evaluations;
     j["push_count"]               = push_count;
     j["pull_round_improved_count"] = pull_round_improved_count;
+    j["iterations"]              = iterations;
     send_string_impl(dest, TAG_STATS, j.dump());
 }
 
 void recv_stats(int source, std::size_t& total_evaluations, std::size_t& push_count,
-                 std::size_t& pull_round_improved_count)
+                 std::size_t& pull_round_improved_count, std::size_t& iterations)
 {
     nlohmann::json j = nlohmann::json::parse(recv_string_impl(source, TAG_STATS));
     pull_round_improved_count = j.at("pull_round_improved_count").get<std::size_t>();
     total_evaluations = j.at("total_evaluations").get<std::size_t>();
     push_count        = j.at("push_count").get<std::size_t>();
+    iterations        = j.at("iterations").get<std::size_t>();
 }
 
 // Cost comparison tolerance for floating-point solution costs.
@@ -499,6 +501,7 @@ Solution run_master(int world_size)
     std::vector<bool> worker_running(static_cast<std::size_t>(world_size), false);
     std::size_t active_workers = 0;
     std::size_t total_evaluations = 0;
+    std::size_t total_worker_iterations = 0;
     std::size_t total_push_count = 0;
     std::size_t accepted_push_count = 0;
     std::size_t pull_request_count = 0;
@@ -721,10 +724,13 @@ Solution run_master(int world_size)
             std::size_t worker_evaluations = 0;
             std::size_t worker_push_count = 0;
             std::size_t worker_pull_round_improved_count = 0;
-            recv_stats(worker_rank, worker_evaluations, worker_push_count, worker_pull_round_improved_count);
+            std::size_t worker_iterations = 0;
+            recv_stats(worker_rank, worker_evaluations, worker_push_count,
+                       worker_pull_round_improved_count, worker_iterations);
             total_evaluations += worker_evaluations;
             total_push_count  += worker_push_count;
             total_pull_round_improved_count += worker_pull_round_improved_count;
+            total_worker_iterations += worker_iterations;
             worker_pull_round_improved_counts_by_rank[static_cast<std::size_t>(worker_rank)] =
                 worker_pull_round_improved_count;
             latest_worker_evals[static_cast<std::size_t>(worker_rank)] = worker_evaluations;
@@ -788,7 +794,8 @@ Solution run_master(int world_size)
                      total_pull_round_improved_count, worker_pull_round_improved_counts,
                      time_checkpoint_limit > 0.0 ? best_solution_cost_by_time_checkpoint
                                                  : std::vector<double>{},
-                     time_checkpoint_limit);
+                     time_checkpoint_limit,
+                     total_worker_iterations);
     return *best_solution;
 }
 
@@ -843,7 +850,8 @@ void run_worker(int /*rank*/)
     Solution result = Solution::tabu_search(root, logger, &hooks);
     wait_all_pending_sends(pending_pushes);
     send_solution(0, TAG_RESULT, result);
-    send_stats(0, logger.total_evaluations, push_count, pull_round_improved_count);
+    send_stats(0, logger.total_evaluations, push_count, pull_round_improved_count,
+               logger._iteration);
 }
 
 } // namespace parallel

@@ -105,7 +105,7 @@ out_file, best_file, *worker_files = sys.argv[1:]
 with open(best_file) as f:
     result = json.load(f)
 
-total, n = 0, 0
+total, iters, n = 0, 0, 0
 cp_series = []
 for wf in worker_files:
     with open(wf) as f:
@@ -113,12 +113,14 @@ for wf in worker_files:
     te = wd.get("total_evaluations")
     if te is not None:
         total += te
+        iters += wd.get("iterations", 0)
         n += 1
     s = wd.get("best_solution_cost_by_time_checkpoint") or []
     if s:
         cp_series.append(s)
 
 result["total_evaluations_all_workers"] = total
+result["iterations_all_workers"] = iters
 result["num_workers"] = n
 if cp_series:
     length = min(len(s) for s in cp_series)

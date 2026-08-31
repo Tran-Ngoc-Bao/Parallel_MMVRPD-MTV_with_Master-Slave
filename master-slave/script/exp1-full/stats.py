@@ -20,6 +20,11 @@ Per instance (n.combo):
                     both being the sum over every worker of that run. Those
                     per-run ratios are then meaned over the instance's paired
                     runs.
+  - iters coop/ims: same recipe on the all-worker iteration count -- coop
+                    uses "iterations", ims uses "iterations_all_workers".
+  - e/i coop/ims  : same recipe on evals-per-iteration, i.e. per run
+                    (coop_evals_k / coop_iters_k) / (ims_evals_k / ims_iters_k),
+                    then meaned over the paired runs.
 
 Aggregated per customer count n as the unweighted mean over that n's
 instances of each per-instance value (win/tie/loss as "count/total"),
@@ -49,6 +54,8 @@ RPD_TIE_EPSILON = 1e-6
 
 COOP_EVALS_FIELD = "total_evaluations"
 IMS_EVALS_FIELD = "total_evaluations_all_workers"
+COOP_ITERS_FIELD = "iterations"
+IMS_ITERS_FIELD = "iterations_all_workers"
 
 # Instances used to tune parameters; the "held-out" summary row aggregates
 # every other instance.
@@ -152,6 +159,24 @@ def compute_row(sats_dir, ims_dir, coop_dir, bks_dir, n, instance):
     coop_evals = statistics.mean(coop_by_run[k] for k in paired) if paired else None
     ims_evals = statistics.mean(ims_by_run[k] for k in paired) if paired else None
 
+    # iters ratio + evals/iter ratio: same per-run-then-mean recipe.
+    #   iters_ratio    = mean_k( coop_iters_k / ims_iters_k )
+    #   evals_per_iter = mean_k( (coop_evals_k/coop_iters_k) / (ims_evals_k/ims_iters_k) )
+    coop_iters_by_run = load_evals_by_run(coop_dir, n, instance, COOP_ITERS_FIELD)
+    ims_iters_by_run = load_evals_by_run(ims_dir, n, instance, IMS_ITERS_FIELD)
+    iters_paired = sorted(k for k in coop_iters_by_run
+                          if ims_iters_by_run.get(k))
+    per_run_iter_ratios = [coop_iters_by_run[k] / ims_iters_by_run[k] for k in iters_paired]
+    iters_ratio = statistics.mean(per_run_iter_ratios) if per_run_iter_ratios else None
+
+    epi_paired = sorted(k for k in paired
+                        if coop_iters_by_run.get(k) and ims_iters_by_run.get(k))
+    per_run_epi_ratios = [
+        (coop_by_run[k] / coop_iters_by_run[k]) / (ims_by_run[k] / ims_iters_by_run[k])
+        for k in epi_paired
+    ]
+    evals_per_iter_ratio = statistics.mean(per_run_epi_ratios) if per_run_epi_ratios else None
+
     return {
         "n": n, "instance": instance, "bks": bks_value,
         "sats_runs": sats["runs"], "sats_rpd_pct": sats["avg_rpd_pct"],
@@ -161,6 +186,8 @@ def compute_row(sats_dir, ims_dir, coop_dir, bks_dir, n, instance):
         "evals_paired_runs": len(paired),
         "coop_evals": coop_evals, "ims_evals": ims_evals,
         "evals_ratio": evals_ratio,
+        "iters_ratio": iters_ratio,
+        "evals_per_iter_ratio": evals_per_iter_ratio,
     }
 
 
@@ -192,6 +219,8 @@ def summarize(rows):
         "coop_losses": results.count("loss"),
         "n_compared": len(results),
         "evals_ratio": mean_or_none(r["evals_ratio"] for r in rows),
+        "iters_ratio": mean_or_none(r["iters_ratio"] for r in rows),
+        "evals_per_iter_ratio": mean_or_none(r["evals_per_iter_ratio"] for r in rows),
     }
 
 
@@ -248,7 +277,8 @@ def main():
 
     header = (f"{'Instance':<12}{'BKS(s)':>12}"
               f"{'RPD sats(%)':>14}{'RPD ims(%)':>13}{'RPD coop(%)':>14}"
-              f"{'delta_coop(%)':>15}{'result':>8}{'evals coop/ims':>16}")
+              f"{'delta_coop(%)':>15}{'result':>8}{'evals coop/ims':>16}"
+              f"{'iters coop/ims':>16}{'e/i coop/ims':>15}")
     print(header)
     print("-" * len(header))
     for r in rows:
@@ -256,7 +286,8 @@ def main():
         print(f"{r['instance']:<12}{fmt(r['bks']):>12}"
               f"{fmt(r['sats_rpd_pct'], 3):>14}{fmt(r['ims_rpd_pct'], 3):>13}"
               f"{fmt(r['coop_rpd_pct'], 3):>14}{fmt(r['delta_coop_pct'], 3):>15}"
-              f"{result:>8}{fmt(r['evals_ratio'], 3):>16}")
+              f"{result:>8}{fmt(r['evals_ratio'], 3):>16}"
+              f"{fmt(r['iters_ratio'], 3):>16}{fmt(r['evals_per_iter_ratio'], 3):>15}")
         for label, key in (("sats", "sats_runs"), ("ims", "ims_runs"), ("coop", "coop_runs")):
             if r[key] and r[key] < args.runs:
                 print(f"    note: {label} only {r[key]}/{args.runs} runs found")
@@ -280,7 +311,7 @@ def main():
 
     sh = (f"{'n':<9}{'avg_rpd_sats(%)':>17}{'avg_rpd_ims(%)':>16}{'avg_rpd_coop(%)':>17}"
           f"{'avg_delta_coop(%)':>19}{'wins':>7}{'ties':>7}{'losses':>8}"
-          f"{'evals coop/ims':>16}")
+          f"{'evals coop/ims':>16}{'iters coop/ims':>16}{'e/i coop/ims':>15}")
     print(f"\n{sh}")
     print("-" * len(sh))
     for s in summary_rows:
@@ -290,7 +321,8 @@ def main():
         print(f"{str(s['n']):<9}{fmt(s['avg_rpd_sats_pct'], 2):>17}{fmt(s['avg_rpd_ims_pct'], 2):>16}"
               f"{fmt(s['avg_rpd_coop_pct'], 2):>17}{fmt(s['avg_delta_coop_pct'], 2):>19}"
               f"{fmt_fraction(s['coop_wins'], total):>7}{fmt_fraction(s['coop_ties'], total):>7}"
-              f"{fmt_fraction(s['coop_losses'], total):>8}{fmt(s['evals_ratio'], 3):>16}")
+              f"{fmt_fraction(s['coop_losses'], total):>8}{fmt(s['evals_ratio'], 3):>16}"
+              f"{fmt(s['iters_ratio'], 3):>16}{fmt(s['evals_per_iter_ratio'], 3):>15}")
 
     if args.no_save:
         return
@@ -302,7 +334,9 @@ def main():
          "result": r["coop_result"],
          "evals_paired_runs": r["evals_paired_runs"],
          "coop_evals": r["coop_evals"], "ims_evals": r["ims_evals"],
-         "evals_ratio_coop_over_ims": r["evals_ratio"]}
+         "evals_ratio_coop_over_ims": r["evals_ratio"],
+         "iters_ratio_coop_over_ims": r["iters_ratio"],
+         "evals_per_iter_ratio_coop_over_ims": r["evals_per_iter_ratio"]}
         for r in rows
     ]
     summary_csv = [
@@ -312,7 +346,9 @@ def main():
          "coop_wins": fmt_fraction(s["coop_wins"], s["n_compared"]),
          "coop_ties": fmt_fraction(s["coop_ties"], s["n_compared"]),
          "coop_losses": fmt_fraction(s["coop_losses"], s["n_compared"]),
-         "evals_ratio_coop_over_ims": s["evals_ratio"]}
+         "evals_ratio_coop_over_ims": s["evals_ratio"],
+         "iters_ratio_coop_over_ims": s["iters_ratio"],
+         "evals_per_iter_ratio_coop_over_ims": s["evals_per_iter_ratio"]}
         for s in summary_rows
     ]
 

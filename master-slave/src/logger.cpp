@@ -179,7 +179,8 @@ void Logger::finalize(const Solution& result,
                       std::size_t pull_round_improved_count,
                       const std::vector<std::size_t>& worker_pull_round_improved_counts,
                       const std::vector<double>& best_solution_cost_by_time_checkpoint,
-                      double time_checkpoint_limit)
+                      double time_checkpoint_limit,
+                      std::size_t total_search_iterations)
 {
     this->total_evaluations = total_evaluations;
 
@@ -196,7 +197,9 @@ void Logger::finalize(const Solution& result,
     run["problem"]                    = _problem;
     run["tabu_size"]                  = tabu_size;
     run["reset_after"]                = reset_after;
-    run["iterations"]                 = _iteration;
+    // Summed over all workers (the master itself never runs a search loop).
+    run["iterations"]                 = total_search_iterations > 0
+        ? total_search_iterations : _iteration;
     run["actual_adaptive_iterations"] = actual_adaptive_iterations;
     run["total_adaptive_segments"]    = total_adaptive_segments;
     run["solution"]                   = sj;
