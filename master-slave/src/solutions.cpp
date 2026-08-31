@@ -1157,7 +1157,10 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
         }
 
         Neighborhood nb = NEIGHBORHOODS[neighborhood_idx];
-        Solution old_current = current;
+        // old_current is only read back in the Vns branch below; skip the
+        // full per-iteration Solution copy for every other strategy.
+        Solution old_current;
+        if (cfg.strategy == cli::Strategy::Vns) old_current = current;
 
         Solution neighbor;
         std::size_t nb_evals = 0;

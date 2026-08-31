@@ -786,10 +786,13 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
     }
 
     Solution current = root;
-    std::vector<std::vector<double>> edge_records(
-        cfg.customers_count+1,
-        std::vector<double>(cfg.customers_count+1,
-                            std::numeric_limits<double>::max()));
+    // Only feeds destroy_and_repair; under --no-reset it is never read, so
+    // skip the (N+1)x(N+1) allocation entirely.
+    std::vector<std::vector<double>> edge_records;
+    if (!cfg.no_reset)
+        edge_records.assign(cfg.customers_count+1,
+            std::vector<double>(cfg.customers_count+1,
+                                std::numeric_limits<double>::max()));
 
     std::vector<Solution> elite_set;
     elite_set.push_back(result);
@@ -805,13 +808,16 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
             last_improved = iteration;
             adaptive.last_improved_seg = segment;
 
-            for (const auto& routes : nb.truck_routes)
-                for (const auto& r : routes) {
-                    const auto& c = r->data().customers;
-                    for (size_t i = 0; i+1 < c.size(); ++i)
-                        edge_records[c[i]][c[i+1]] =
-                            std::min(edge_records[c[i]][c[i+1]], nb.working_time);
-                }
+            // edge_records only feeds destroy_and_repair, which --no-reset
+            // never calls -> skip maintaining it in that case.
+            if (!cfg.no_reset)
+                for (const auto& routes : nb.truck_routes)
+                    for (const auto& r : routes) {
+                        const auto& c = r->data().customers;
+                        for (size_t i = 0; i+1 < c.size(); ++i)
+                            edge_records[c[i]][c[i+1]] =
+                                std::min(edge_records[c[i]][c[i+1]], nb.working_time);
+                    }
 
             if (cfg.max_elite_size > 0) {
                 if (elite_set.size() == cfg.max_elite_size) {
@@ -896,7 +902,10 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
         }
 
         Neighborhood nb = NEIGHBORHOODS[neighborhood_idx];
-        Solution old_current = current;
+        // old_current is only read back in the Vns branch below; skip the
+        // full per-iteration Solution copy for every other strategy.
+        Solution old_current;
+        if (cfg.strategy == cli::Strategy::Vns) old_current = current;
 
         Solution neighbor;
         std::size_t nb_evals = 0;
@@ -930,24 +939,24 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
 
         if (eos) ++adaptive.segment;
 
-        // Check reset condition
+        // Check reset condition. --no-reset skips it entirely: no restart
+        // from an elite on stagnation. NOTE: without --time-limit or
+        // --max-evaluations the loop then has no stop condition and spins
+        // until max_iter.
         bool do_reset = false;
-        if (cfg.strategy == cli::Strategy::Adaptive) {
-            if (cfg.adaptive_fixed_segments)
-                do_reset = adaptive.segment >= adaptive.segment_reset + cfg.adaptive_segments;
-            else
-                do_reset = adaptive.segment >=
-                    std::max(adaptive.segment_reset, adaptive.last_improved_seg)
-                    + cfg.adaptive_segments;
-        } else {
-            do_reset = iteration != last_improved
-                    && (iteration - last_improved) % reset_after == 0;
+        if (!cfg.no_reset) {
+            if (cfg.strategy == cli::Strategy::Adaptive) {
+                if (cfg.adaptive_fixed_segments)
+                    do_reset = adaptive.segment >= adaptive.segment_reset + cfg.adaptive_segments;
+                else
+                    do_reset = adaptive.segment >=
+                        std::max(adaptive.segment_reset, adaptive.last_improved_seg)
+                        + cfg.adaptive_segments;
+            } else {
+                do_reset = iteration != last_improved
+                        && (iteration - last_improved) % reset_after == 0;
+            }
         }
-
-        // --no-reset: never restart from an elite on stagnation (kills the
-        // block below). Without --time-limit/--max-evaluations the run then
-        // has no stop condition and spins until max_iter.
-        if (cfg.no_reset) do_reset = false;
 
         if (do_reset) {
             adaptive.segment_reset = adaptive.segment;
