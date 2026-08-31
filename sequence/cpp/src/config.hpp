@@ -139,6 +139,7 @@ struct Config {
     bool                 adaptive_fixed_iterations = false;
     std::size_t          adaptive_segments         = 7;
     bool                 adaptive_fixed_segments   = false;
+    bool                 allow_reset               = true;
     std::size_t          ejection_chain_iterations = 0;
     double               destroy_rate              = 0.1;
     cli::ConfigType      speed_type                = cli::ConfigType::High;

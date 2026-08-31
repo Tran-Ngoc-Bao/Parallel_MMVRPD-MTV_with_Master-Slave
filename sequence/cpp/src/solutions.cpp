@@ -944,6 +944,11 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
                     && (iteration - last_improved) % reset_after == 0;
         }
 
+        // --no-reset: never restart from an elite on stagnation (kills the
+        // block below). Without --time-limit/--max-evaluations the run then
+        // has no stop condition and spins until max_iter.
+        if (!cfg.allow_reset) do_reset = false;
+
         if (do_reset) {
             adaptive.segment_reset = adaptive.segment;
             adaptive.weights.assign(NUM_NEIGHBORHOODS, 1.0);
