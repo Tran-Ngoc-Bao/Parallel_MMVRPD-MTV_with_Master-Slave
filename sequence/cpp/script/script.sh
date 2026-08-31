@@ -13,6 +13,7 @@ COMPACT_OUTPUT="${COMPACT_OUTPUT:-1}"
 RUN_ID="${RUN_ID:-}"
 SEED="${SEED:-}"
 TIME_LIMIT="${TIME_LIMIT:-}"
+NO_RESET="${NO_RESET:-0}"
 
 case "${PROBLEM_FILE}" in
   /*) ;;
@@ -43,6 +44,10 @@ fi
 
 if [ -n "${TIME_LIMIT}" ]; then
   CMD+=(--time-limit "${TIME_LIMIT}")
+fi
+
+if [ "${NO_RESET}" = "1" ]; then
+  CMD+=(--no-reset)
 fi
 
 cd "${PROJECT_DIR}"

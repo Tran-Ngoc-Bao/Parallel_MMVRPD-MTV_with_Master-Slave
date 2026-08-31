@@ -289,7 +289,7 @@ Config build_config(const cli::RunArgs& args)
     cfg.adaptive_fixed_iterations = args.adaptive_fixed_iterations;
     cfg.adaptive_segments         = args.adaptive_segments;
     cfg.adaptive_fixed_segments   = args.adaptive_fixed_segments;
-    cfg.allow_reset               = args.allow_reset;
+    cfg.no_reset                  = args.no_reset;
     cfg.ejection_chain_iterations = args.ejection_chain_iterations;
     cfg.destroy_rate              = args.destroy_rate;
     cfg.speed_type                = args.speed_type;
@@ -426,7 +426,7 @@ nlohmann::json config_to_json(const Config& cfg) {
     j["adaptive_fixed_iterations"] = cfg.adaptive_fixed_iterations;
     j["adaptive_segments"]         = cfg.adaptive_segments;
     j["adaptive_fixed_segments"]   = cfg.adaptive_fixed_segments;
-    j["allow_reset"]               = cfg.allow_reset;
+    j["no_reset"]                  = cfg.no_reset;
     j["ejection_chain_iterations"] = cfg.ejection_chain_iterations;
     j["destroy_rate"]              = cfg.destroy_rate;
     j["speed_type"]                = config_type_str(cfg.speed_type);
@@ -576,7 +576,7 @@ Config build_config_from_json(const std::string& json_path)
     cfg.adaptive_fixed_iterations = j.at("adaptive_fixed_iterations").get<bool>();
     cfg.adaptive_segments         = j.at("adaptive_segments").get<std::size_t>();
     cfg.adaptive_fixed_segments   = j.at("adaptive_fixed_segments").get<bool>();
-    cfg.allow_reset               = j.value("allow_reset", true);
+    cfg.no_reset                  = j.value("no_reset", false);
     cfg.ejection_chain_iterations = j.at("ejection_chain_iterations").get<std::size_t>();
     cfg.destroy_rate              = j.at("destroy_rate").get<double>();
     cfg.speed_type                = st_from_str(j.at("speed_type").get<std::string>());

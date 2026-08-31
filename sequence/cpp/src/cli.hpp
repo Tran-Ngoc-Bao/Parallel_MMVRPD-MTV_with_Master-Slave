@@ -48,7 +48,7 @@ struct RunArgs {
     bool          adaptive_fixed_iterations  = false;
     std::size_t   adaptive_segments          = 7;
     bool          adaptive_fixed_segments    = false;
-    bool          allow_reset                = true;
+    bool          no_reset                   = false;
     std::size_t   ejection_chain_iterations  = 0;
     double        destroy_rate               = 0.1;
     ConfigType    speed_type                 = ConfigType::High;

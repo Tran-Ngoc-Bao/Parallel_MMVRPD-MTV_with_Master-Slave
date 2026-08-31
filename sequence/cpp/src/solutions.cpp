@@ -947,7 +947,7 @@ Solution Solution::tabu_search(Solution root, Logger& logger)
         // --no-reset: never restart from an elite on stagnation (kills the
         // block below). Without --time-limit/--max-evaluations the run then
         // has no stop condition and spins until max_iter.
-        if (!cfg.allow_reset) do_reset = false;
+        if (cfg.no_reset) do_reset = false;
 
         if (do_reset) {
             adaptive.segment_reset = adaptive.segment;

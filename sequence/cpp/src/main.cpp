@@ -39,9 +39,8 @@ int main(int argc, char** argv)
     run_cmd->add_flag  ("--adaptive-fixed-iterations", args.run.adaptive_fixed_iterations);
     run_cmd->add_option("--adaptive-segments",         args.run.adaptive_segments);
     run_cmd->add_flag  ("--adaptive-fixed-segments",   args.run.adaptive_fixed_segments);
-    run_cmd->add_flag  ("--allow-reset,!--no-reset",   args.run.allow_reset,
-                        "Allow restart-from-elite on stagnation (do_reset). "
-                        "Pass --no-reset to disable it entirely (default: allowed).");
+    run_cmd->add_flag  ("--no-reset",                  args.run.no_reset,
+                        "Disable restart-from-elite on stagnation (do_reset).");
     run_cmd->add_option("--ejection-chain-iterations", args.run.ejection_chain_iterations);
     run_cmd->add_option("--destroy-rate",              args.run.destroy_rate);
 
