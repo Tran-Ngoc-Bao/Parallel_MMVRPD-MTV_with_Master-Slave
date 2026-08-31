@@ -15,11 +15,11 @@ export LC_NUMERIC=C
 # Per-n time limits below: 100/200/500/1000 match ../exp1/run4_batch.sh;
 # 6/10/12/20/50 are PLACEHOLDERS (not yet tuned) -- adjust as needed.
 JOBS=(
-    "6     0.01"
-    "10    0.04"
-    "12    0.06"
-    "20    0.1"
-    "50    1.5"
+    "6     1"
+    "10    1"
+    "12    1"
+    "20    1"
+    "50    2"
     "100   10"
     "200   35"
     "500   700"
