@@ -155,9 +155,20 @@ def main():
     ap.add_argument("--dump-csv", default=None,
                     help="Also write the mean-RPD table (method x checkpoint) to this CSV file")
     ap.add_argument("--dpi", type=int, default=150, help="DPI of the output image (default: 150)")
+    ap.add_argument("--markersize", type=float, default=4.0,
+                    help="Marker size for the circle/square/triangle points (default: 4)")
     ap.add_argument("--ylim", default=None,
                     help="y-axis limits 'min,max' to zoom in (e.g. -1,3). "
                          "Checkpoint 0/8 is usually huge and flattens the rest.")
+    ap.add_argument("--yticks", type=float, default=None,
+                    help="Fixed spacing between y-axis major ticks (e.g. 0.1). "
+                         "Default: auto, denser than matplotlib's default.")
+    ap.add_argument("--ynbins", type=int, default=16,
+                    help="Target number of y-axis major ticks when --yticks is unset "
+                         "(default: 16)")
+    ap.add_argument("--yminor", type=int, default=5,
+                    help="Minor-tick subdivisions between each pair of major y ticks "
+                         "(default: 5; set 1 to disable minor ticks/grid)")
     ap.add_argument("--show", action="store_true", help="Open a window to display the plot")
     args = ap.parse_args()
 
@@ -200,6 +211,7 @@ def main():
         if not args.show:
             matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        from matplotlib.ticker import AutoMinorLocator, MaxNLocator, MultipleLocator
     except ImportError:
         sys.exit("error: matplotlib is required to plot -- install with:  python3 -m pip install --user matplotlib\n"
                  "     (you can still use --dump-csv to export the numbers without matplotlib)")
@@ -219,12 +231,21 @@ def main():
             ys = [curve[method][cp] for cp in cps]
             st = METHOD_STYLE[method]
             ax.plot(xs, ys, marker=st["marker"], color=st["color"], label=st["label"],
-                    linewidth=1.8, markersize=6)
+                    linewidth=1.8, markersize=args.markersize)
         ax.set_xticks(xs)
         ax.set_xticklabels([f"{cp}/{denom}" for cp in cps])
         if ylim:
             ax.set_ylim(*ylim)
-        ax.grid(True, linestyle=":", alpha=0.5)
+        # Denser y-axis: explicit major step via --yticks, else many auto
+        # major ticks, plus --yminor minor subdivisions between them.
+        if args.yticks:
+            ax.yaxis.set_major_locator(MultipleLocator(args.yticks))
+        else:
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=args.ynbins, steps=[1, 2, 2.5, 5, 10]))
+        if args.yminor > 1:
+            ax.yaxis.set_minor_locator(AutoMinorLocator(args.yminor))
+        ax.grid(True, which="major", linestyle=":", alpha=0.5)
+        ax.grid(True, which="minor", linestyle=":", alpha=0.25, linewidth=0.5)
         ax.axhline(0.0, color="0.6", linewidth=0.8)
         ax.legend()
         fig.tight_layout()
