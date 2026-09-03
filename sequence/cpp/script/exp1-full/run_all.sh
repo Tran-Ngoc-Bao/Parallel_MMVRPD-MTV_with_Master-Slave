@@ -23,7 +23,7 @@ JOBS=(
     "100   10"
     "200   35"
     "500   700"
-    # "1000  4500"
+    "1000  4500"
 )
 
 # Usage:
@@ -37,8 +37,8 @@ RUNS="${1:-10}"
 SLEEP_SEC="${2:-0.0}"
 CPU_CORES="${3:-0,2,4,6,8,10}"
 
-# n=1000 only needs 5 runs; every other n uses the RUNS above.
-RUNS_1000=5
+# n=1000 only needs 3 runs; every other n uses the RUNS above.
+RUNS_1000=3
 
 # run_phase <label> <script>
 run_phase() {
