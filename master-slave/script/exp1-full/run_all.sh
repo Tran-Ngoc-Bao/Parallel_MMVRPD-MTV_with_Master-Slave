@@ -40,8 +40,8 @@ RUNS="${1:-10}"
 SLEEP_SEC="${2:-0.0}"
 NUM_WORKERS="${3:-7}"
 
-# n=1000 only needs 3 runs; every other n uses the RUNS above.
-RUNS_1000=3
+# n=1000 only needs 5 runs; every other n uses the RUNS above.
+RUNS_1000=5
 
 run_stats() {
     local customers_so_far="$1"
