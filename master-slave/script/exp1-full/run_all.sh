@@ -40,9 +40,6 @@ RUNS="${1:-10}"
 SLEEP_SEC="${2:-0.0}"
 NUM_WORKERS="${3:-7}"
 
-# n=1000 only needs 5 runs; every other n uses the RUNS above.
-RUNS_1000=5
-
 run_stats() {
     local customers_so_far="$1"
     local stage="$2"
@@ -60,9 +57,6 @@ for JOB in "${JOBS[@]}"; do
     CUSTOMERS_SO_FAR="$(IFS=,; echo "${N_LIST[*]}")"
 
     JOB_RUNS="${RUNS}"
-    if [ "${N}" = "1000" ]; then
-        JOB_RUNS="${RUNS_1000}"
-    fi
 
     echo
     echo "################################################################"

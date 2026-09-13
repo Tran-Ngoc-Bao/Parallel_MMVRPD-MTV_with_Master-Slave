@@ -37,9 +37,6 @@ RUNS="${1:-10}"
 SLEEP_SEC="${2:-0.0}"
 CPU_CORES="${3:-0,2,4,6,8,10}"
 
-# n=1000 only needs 5 runs; every other n uses the RUNS above.
-RUNS_1000=5
-
 # run_phase <label> <script>
 run_phase() {
     local label="$1"
@@ -49,9 +46,6 @@ run_phase() {
         read -r N TIME_LIMIT <<< "${JOB}"
 
         local job_runs="${RUNS}"
-        if [ "${N}" = "1000" ]; then
-            job_runs="${RUNS_1000}"
-        fi
 
         echo
         echo "################################################################"
