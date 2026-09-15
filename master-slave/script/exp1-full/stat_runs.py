@@ -17,6 +17,9 @@ Columns:
     bks         BKS working_time (not rounded)
     ims-final   ims run's final working_time (not rounded)
     coop-final  coop run's final working_time (not rounded)
+    delta_coop  (ims-final - coop-final) / ims-final * 100, in percent
+                (positive = coop better); blank if either side is missing
+                or ims-final is 0
     ims-evals   ims run's total_evaluations_all_workers (sum over every
                 worker; not rounded)
     coop-evals  coop run's total_evaluations (already the island-wide sum)
@@ -47,11 +50,11 @@ COOP_EVALS_FIELD = "total_evaluations"
 IMS_EVALS_FIELD = "total_evaluations_all_workers"
 
 COLUMNS = ["instance", "n", "set", "Tn", "run", "seed", "bks",
-           "ims-final", "coop-final", "ims-evals", "coop-evals"]
+           "ims-final", "coop-final", "delta_coop", "ims-evals", "coop-evals"]
 
 # Columns written as numbers (not text) in the .xlsx.
 NUMERIC_COLUMNS = {"n", "Tn", "run", "seed", "bks", "ims-final", "coop-final",
-                   "ims-evals", "coop-evals"}
+                   "delta_coop", "ims-evals", "coop-evals"}
 
 RUNFILE_RE = re.compile(r"^(\d+)\.(.+)-(\d+)\.json$")
 
@@ -131,6 +134,13 @@ def collect_rows(coop_dir, ims_dir, bks_dir, wanted_customers, tuning):
             if ims is not None and ims_evals is None:
                 missing_ims_evals += 1
 
+            ims_final = working_time(ims) if ims else None
+            coop_final = working_time(coop) if coop else None
+            delta_coop = ((ims_final - coop_final) / ims_final * 100
+                          if ims_final is not None and coop_final is not None
+                          and ims_final != 0
+                          else None)
+
             rows.append({
                 "instance": instance,
                 "n": int(n),
@@ -139,8 +149,9 @@ def collect_rows(coop_dir, ims_dir, bks_dir, wanted_customers, tuning):
                 "run": run,
                 "seed": seed,
                 "bks": bks_cache[instance],
-                "ims-final": working_time(ims) if ims else None,
-                "coop-final": working_time(coop) if coop else None,
+                "ims-final": ims_final,
+                "coop-final": coop_final,
+                "delta_coop": delta_coop,
                 "ims-evals": ims_evals,
                 "coop-evals": coop.get(COOP_EVALS_FIELD) if coop else None,
             })
