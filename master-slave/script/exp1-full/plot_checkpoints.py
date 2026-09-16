@@ -9,7 +9,7 @@ file emitted by `stat_checkpoints.py`
     - one line per method (sats, ims, coop); only methods present in the
       CSV are drawn.
 
-Two images are written (no title / axis labels):
+Two images are written (no title, but with axis labels):
     checkpoint_curves.png       - all 9 checkpoints (includes 0/8)
     checkpoint_curves_no0.png   - drops checkpoint 0/8 so the remaining
                                   points are readable
@@ -48,9 +48,9 @@ DEFAULT_IN = SCRIPT_DIR / ".." / ".." / "outputs" / "exp1-full" / "checkpoint_cu
 # Fixed draw order / colour per method (a method absent from the CSV is skipped).
 METHOD_ORDER = ("sats", "ims", "coop")
 METHOD_STYLE = {
-    "sats": {"color": "#1f77b4", "marker": "o", "label": "SATS"},
-    "ims":  {"color": "#ff7f0e", "marker": "s", "label": "IMS"},
-    "coop": {"color": "#2ca02c", "marker": "^", "label": "COOP"},
+    "sats": {"color": "#1f77b4", "marker": "o", "label": "S-ATS"},
+    "ims":  {"color": "#ff7f0e", "marker": "s", "label": "IMS-6"},
+    "coop": {"color": "#2ca02c", "marker": "^", "label": "COOP-EDGE"},
 }
 
 
@@ -166,9 +166,6 @@ def main():
     ap.add_argument("--ynbins", type=int, default=16,
                     help="Target number of y-axis major ticks when --yticks is unset "
                          "(default: 16)")
-    ap.add_argument("--yminor", type=int, default=5,
-                    help="Minor-tick subdivisions between each pair of major y ticks "
-                         "(default: 5; set 1 to disable minor ticks/grid)")
     ap.add_argument("--show", action="store_true", help="Open a window to display the plot")
     args = ap.parse_args()
 
@@ -211,7 +208,7 @@ def main():
         if not args.show:
             matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        from matplotlib.ticker import AutoMinorLocator, MaxNLocator, MultipleLocator
+        from matplotlib.ticker import MaxNLocator, MultipleLocator
     except ImportError:
         sys.exit("error: matplotlib is required to plot -- install with:  python3 -m pip install --user matplotlib\n"
                  "     (you can still use --dump-csv to export the numbers without matplotlib)")
@@ -224,7 +221,7 @@ def main():
         except ValueError:
             sys.exit("error: --ylim must have the form 'min,max' (e.g. -1,3)")
 
-    def render(cps, out_path):
+    def render(cps, out_path, ylabel_pad=4):
         xs = [cp / denom for cp in cps]
         fig, ax = plt.subplots(figsize=(8, 5))
         for method in methods_present:
@@ -233,28 +230,28 @@ def main():
             ax.plot(xs, ys, marker=st["marker"], color=st["color"], label=st["label"],
                     linewidth=1.8, markersize=args.markersize)
         ax.set_xticks(xs)
-        ax.set_xticklabels([f"{cp}/{denom}" for cp in cps])
+        ax.set_xticklabels([f"{x * 100:g}" for x in xs])
+        ax.set_xlabel("Normalized elapsed wall-clock time (%)", labelpad=6)
+        ax.set_ylabel("Mean best-so-far RPD (%) — lower is better", labelpad=ylabel_pad)
+        ax.tick_params(axis="both", labelsize=9)
         if ylim:
             ax.set_ylim(*ylim)
-        # Denser y-axis: explicit major step via --yticks, else many auto
-        # major ticks, plus --yminor minor subdivisions between them.
+        # Denser y-axis: explicit major step via --yticks, else many auto major ticks.
         if args.yticks:
             ax.yaxis.set_major_locator(MultipleLocator(args.yticks))
         else:
             ax.yaxis.set_major_locator(MaxNLocator(nbins=args.ynbins, steps=[1, 2, 2.5, 5, 10]))
-        if args.yminor > 1:
-            ax.yaxis.set_minor_locator(AutoMinorLocator(args.yminor))
-        ax.grid(True, which="major", linestyle=":", alpha=0.5)
-        ax.grid(True, which="minor", linestyle=":", alpha=0.25, linewidth=0.5)
+        ax.grid(True, which="major", linestyle="-", linewidth=0.9, alpha=0.7, color="0.5")
         ax.axhline(0.0, color="0.6", linewidth=0.8)
-        ax.legend()
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=len(methods_present),
+                  frameon=False, borderaxespad=0.1)
         fig.tight_layout()
-        fig.savefig(out_path, dpi=args.dpi)
+        fig.savefig(out_path, dpi=args.dpi, bbox_inches="tight")
         print(f"Saved the plot to {out_path}")
 
     base = (Path(args.out).resolve() if args.out
             else csv_path.with_name("checkpoint_curves.png"))
-    render(checkpoints, base)                                    # with checkpoint 0
+    render(checkpoints, base, ylabel_pad=6)                       # with checkpoint 0
     rest = [cp for cp in checkpoints if cp != 0]
     if rest:
         render(rest, base.with_name(base.stem + "_no0" + base.suffix))  # without checkpoint 0

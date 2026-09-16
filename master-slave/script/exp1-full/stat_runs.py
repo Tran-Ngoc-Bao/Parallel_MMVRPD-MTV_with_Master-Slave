@@ -29,8 +29,11 @@ Source:
     ims  : <seq-ims-outputs>/<n>/<n>.<combo>-<run>.json
     bks  : <bks>/<n>/<n>.<combo>-bks.json
 
-Two files are written side by side: the CSV and an .xlsx with the same
-rows (the .xlsx step is skipped with a warning if openpyxl is missing).
+Two CSV/xlsx pairs are written side by side, same rows, differing only in
+whether delta_coop is included:
+    runs.csv / runs.xlsx              - without delta_coop
+    runs_delta.csv / runs_delta.xlsx  - with delta_coop
+(each .xlsx step is skipped with a warning if openpyxl is missing).
 
 Usage:
     python3 stat_runs.py
@@ -49,8 +52,10 @@ TUNING_INSTANCES = {"200.10.2", "200.40.1", "500.10.2", "500.40.1"}
 COOP_EVALS_FIELD = "total_evaluations"
 IMS_EVALS_FIELD = "total_evaluations_all_workers"
 
-COLUMNS = ["instance", "n", "set", "Tn", "run", "seed", "bks",
-           "ims-final", "coop-final", "delta_coop", "ims-evals", "coop-evals"]
+COLUMNS_NO_DELTA = ["instance", "n", "set", "Tn", "run", "seed", "bks",
+                    "ims-final", "coop-final", "ims-evals", "coop-evals"]
+COLUMNS_WITH_DELTA = ["instance", "n", "set", "Tn", "run", "seed", "bks",
+                      "ims-final", "coop-final", "delta_coop", "ims-evals", "coop-evals"]
 
 # Columns written as numbers (not text) in the .xlsx.
 NUMERIC_COLUMNS = {"n", "Tn", "run", "seed", "bks", "ims-final", "coop-final",
@@ -158,16 +163,16 @@ def collect_rows(coop_dir, ims_dir, bks_dir, wanted_customers, tuning):
     return rows, missing_ims_evals
 
 
-def write_csv(rows, out_path: Path):
+def write_csv(rows, out_path: Path, columns):
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(COLUMNS)
+        writer.writerow(columns)
         for r in rows:
-            writer.writerow(["" if r[c] is None else r[c] for c in COLUMNS])
+            writer.writerow(["" if r[c] is None else r[c] for c in columns])
 
 
-def write_xlsx(rows, out_path: Path):
+def write_xlsx(rows, out_path: Path, columns):
     """Same rows as the CSV, but numeric cells stay numeric. Needs openpyxl."""
     try:
         from openpyxl import Workbook
@@ -180,11 +185,11 @@ def write_xlsx(rows, out_path: Path):
     wb = Workbook()
     ws = wb.active
     ws.title = "runs"
-    ws.append(COLUMNS)
+    ws.append(columns)
     for r in rows:
         ws.append([r[c] if c in NUMERIC_COLUMNS else
                    ("" if r[c] is None else r[c])
-                   for c in COLUMNS])
+                   for c in columns])
     ws.freeze_panes = "A2"
     wb.save(out_path)
     return out_path
@@ -211,7 +216,10 @@ def main():
                     help="Instances in the 'tuning' set, comma-separated "
                          f"(default: {','.join(sorted(TUNING_INSTANCES))})")
     ap.add_argument("-o", "--out", default=None,
-                    help="Output .csv file (default: <coop-outputs>/../runs.csv)")
+                    help="Output .csv file without delta_coop "
+                         "(default: <coop-outputs>/../runs.csv); "
+                         "the delta_coop companion is written next to it as "
+                         "<stem>_delta<suffix>")
     args = ap.parse_args()
 
     coop_dir = Path(args.coop_outputs).resolve()
@@ -228,13 +236,19 @@ def main():
         print("No run found (check the paths).", file=sys.stderr)
         sys.exit(1)
 
-    write_csv(rows, out_path)
-    xlsx_path = write_xlsx(rows, out_path.with_suffix(".xlsx"))
+    delta_path = out_path.with_name(out_path.stem + "_delta" + out_path.suffix)
+
+    write_csv(rows, out_path, COLUMNS_NO_DELTA)
+    write_csv(rows, delta_path, COLUMNS_WITH_DELTA)
+    xlsx_path = write_xlsx(rows, out_path.with_suffix(".xlsx"), COLUMNS_NO_DELTA)
+    xlsx_delta_path = write_xlsx(rows, delta_path.with_suffix(".xlsx"), COLUMNS_WITH_DELTA)
 
     n_inst = len({r["instance"] for r in rows})
-    print(f"Wrote {len(rows)} rows ({n_inst} instances) to {out_path}")
+    print(f"Wrote {len(rows)} rows ({n_inst} instances) to {out_path} and {delta_path}")
     if xlsx_path is not None:
         print(f"  and to {xlsx_path}")
+    if xlsx_delta_path is not None:
+        print(f"  and to {xlsx_delta_path}")
     both = sum(1 for r in rows if r["ims-final"] is not None and r["coop-final"] is not None)
     print(f"  have both ims and coop: {both} rows")
     if missing_ims_evals:
