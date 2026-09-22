@@ -9,10 +9,16 @@ file emitted by `stat_checkpoints.py`
     - one line per method (sats, ims, coop); only methods present in the
       CSV are drawn.
 
-Two images are written (no title, but with axis labels):
-    checkpoint_curves.png       - all 9 checkpoints (includes 0/8)
-    checkpoint_curves_no0.png   - drops checkpoint 0/8 so the remaining
-                                  points are readable
+Four images are written (no title, but with axis labels):
+    checkpoint_curves.png            - all 9 checkpoints (includes 0/8)
+    checkpoint_curves_no0.png        - drops checkpoint 0/8 so the remaining
+                                        points are readable
+    checkpoint_curves_gt20.png       - same as checkpoint_curves.png, but
+                                        drops customer-set sizes <= 20
+                                        (--exclude-max-customers); auto
+                                        y-ticks, same as checkpoint_curves.png
+    checkpoint_curves_gt20_no0.png   - the gt20 curve without checkpoint 0/8,
+                                        fixed y-ticks (--gt-yticks)
 
 Per-row RPD = (BestCost - BKS) / BKS * 100. Rows without a BKS (empty
 BKS column) are skipped.
@@ -166,6 +172,13 @@ def main():
     ap.add_argument("--ynbins", type=int, default=16,
                     help="Target number of y-axis major ticks when --yticks is unset "
                          "(default: 16)")
+    ap.add_argument("--exclude-max-customers", type=int, default=20,
+                    help="Also write a second pair of images excluding customer-set "
+                         "sizes <= this value (default: 20; e.g. drops 6/10/12/20). "
+                         "Set to a negative number to skip this extra pair.")
+    ap.add_argument("--gt-yticks", type=float, default=0.4,
+                    help="Fixed y-axis major tick spacing for the >N-customers plots "
+                         "(default: 0.4)")
     ap.add_argument("--show", action="store_true", help="Open a window to display the plot")
     args = ap.parse_args()
 
@@ -221,7 +234,7 @@ def main():
         except ValueError:
             sys.exit("error: --ylim must have the form 'min,max' (e.g. -1,3)")
 
-    def render(cps, out_path, ylabel_pad=4):
+    def render(cps, out_path, curve, methods_present, ylabel_pad=4, yticks=None):
         xs = [cp / denom for cp in cps]
         fig, ax = plt.subplots(figsize=(8, 5))
         for method in methods_present:
@@ -236,9 +249,11 @@ def main():
         ax.tick_params(axis="both", labelsize=9)
         if ylim:
             ax.set_ylim(*ylim)
-        # Denser y-axis: explicit major step via --yticks, else many auto major ticks.
-        if args.yticks:
-            ax.yaxis.set_major_locator(MultipleLocator(args.yticks))
+        # Denser y-axis: explicit major step (per-call yticks, else --yticks), else many
+        # auto major ticks.
+        yticks_step = yticks if yticks is not None else args.yticks
+        if yticks_step:
+            ax.yaxis.set_major_locator(MultipleLocator(yticks_step))
         else:
             ax.yaxis.set_major_locator(MaxNLocator(nbins=args.ynbins, steps=[1, 2, 2.5, 5, 10]))
         ax.grid(True, which="major", linestyle="-", linewidth=0.9, alpha=0.7, color="0.5")
@@ -251,10 +266,37 @@ def main():
 
     base = (Path(args.out).resolve() if args.out
             else csv_path.with_name("checkpoint_curves.png"))
-    render(checkpoints, base, ylabel_pad=6)                       # with checkpoint 0
+    render(checkpoints, base, curve, methods_present, ylabel_pad=6)       # with checkpoint 0
     rest = [cp for cp in checkpoints if cp != 0]
     if rest:
-        render(rest, base.with_name(base.stem + "_no0" + base.suffix))  # without checkpoint 0
+        render(rest, base.with_name(base.stem + "_no0" + base.suffix),
+               curve, methods_present)                                    # without checkpoint 0
+
+    if args.exclude_max_customers >= 0:
+        thresh = args.exclude_max_customers
+        rpd_rows_large = [r for r in rpd_rows if r[1] > thresh]
+        if not rpd_rows_large:
+            print(f"  skipping the >{thresh}-customers plot: no rows left after excluding "
+                  f"customer-set sizes <= {thresh}", file=sys.stderr)
+        else:
+            curve_large, checkpoints_large = aggregate(rpd_rows_large)
+            methods_present_large = [m for m in METHOD_ORDER if m in curve_large]
+            n_by_large = defaultdict(lambda: [set(), set(), set()])
+            for method, customers, instance, run, _cp, _rpd in rpd_rows_large:
+                s = n_by_large[method]
+                s[0].add(customers); s[1].add((customers, instance)); s[2].add((customers, instance, run))
+            print(f"Excluding customer-set sizes <= {thresh}:")
+            for method in methods_present_large:
+                s = n_by_large[method]
+                print(f"  {method}: {len(s[0])} customer sets, {len(s[1])} instances, {len(s[2])} runs")
+
+            gt_base = base.with_name(base.stem + f"_gt{thresh}" + base.suffix)
+            render(checkpoints_large, gt_base, curve_large, methods_present_large,
+                   ylabel_pad=6)                                    # auto y-ticks, like checkpoint_curves.png
+            rest_large = [cp for cp in checkpoints_large if cp != 0]
+            if rest_large:
+                render(rest_large, gt_base.with_name(gt_base.stem + "_no0" + gt_base.suffix),
+                       curve_large, methods_present_large, yticks=args.gt_yticks)
 
     if args.show:
         plt.show()
