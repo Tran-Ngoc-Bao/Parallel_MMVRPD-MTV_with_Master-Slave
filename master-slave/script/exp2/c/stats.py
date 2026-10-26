@@ -15,20 +15,26 @@ For each pull strategy reports:
     accept filter saves/costs vs blindly accepting every pull)
   - selective AR (%): pull_accept_count / pull_offer_count * 100, under the
     "selective" accept strategy (acceptance rate of offered elite pulls)
+  - always IRPD (%): trapezoidal-rule average of R0..R8 (RPD (%) of
+    best_solution_cost_by_evaluation_checkpoint at 0/8..8/8 of the
+    evaluation budget vs BKS working_time), under the "always" accept
+    strategy; (1/8) * [(R0+R8)/2 + R1+...+R7]
+  - selective IRPD (%): same, under the "selective" accept strategy
 
 RPD (%) = (value - BKS) / BKS * 100, same as exp1.5/stats.py.
 
 Aggregation: for each (n, combo) instance and each (pull_strategy,
 accept_strategy) pair, RPD is computed per run first (from that run's own
-final cost vs BKS), then averaged over runs. Selective AR (%) is instead
-pooled across runs: N_accept summed over the instance's runs / N_offer
-summed over the instance's runs * 100 (not averaged per-run) -- offer
-counts can vary a lot run to run, so pooling weights each pull attempt
-equally instead of each run equally. These per-instance numbers are then
-averaged over instances (6 by default: 3 customer counts x 2 combos) to get
-each pull strategy's final numbers. delta_acc is derived from the final
-averaged always/selective RPDs (equivalent to averaging per-instance
-deltas, since RPD is linear).
+final cost vs BKS), then averaged over runs. IRPD is also computed per run
+first (from that run's own R0..R8), then averaged over runs -- same approach
+as exp2/a/d/e. Selective AR (%) is instead pooled across runs: N_accept
+summed over the instance's runs / N_offer summed over the instance's runs *
+100 (not averaged per-run) -- offer counts can vary a lot run to run, so
+pooling weights each pull attempt equally instead of each run equally. These
+per-instance numbers are then averaged over instances (6 by default: 3
+customer counts x 2 combos) to get each pull strategy's final numbers.
+delta_acc is derived from the final averaged always/selective RPDs
+(equivalent to averaging per-instance deltas, since RPD is linear).
 
 Looks for run files at
 <outputs>/<n>/<n>.<combo>-<pull_strategy>-<accept_strategy>-<run_id>.json
@@ -49,6 +55,7 @@ from pathlib import Path
 
 PULL_STRATEGIES = ["random", "topk", "rank", "pullcount"]
 ACCEPT_STRATEGIES = ["always", "selective"]
+NUM_CHECKPOINTS = 9  # R0..R8, at k/8 of the evaluation budget
 
 
 def load_run(path: Path):
@@ -83,6 +90,13 @@ def rpd_pct(value, bks_value):
     return (value - bks_value) / bks_value * 100.0
 
 
+def irpd_pct(r):
+    """Trapezoidal-rule average of r[0..8] over the 8 intervals."""
+    if any(v is None for v in r):
+        return None
+    return ((r[0] + r[8]) / 2.0 + sum(r[1:8])) / 8.0
+
+
 def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expected_runs: int):
     instance = f"{n}.{combo}"
     bks_path = bks_dir / n / f"{instance}-bks.json"
@@ -97,11 +111,13 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
             run_files = find_run_files(outputs_dir, n, instance, pull_strategy, accept_strategy)
 
             rpds, accept_counts, offer_counts = [], [], []
+            irpds_per_run = []
             for run_id, path in run_files:
                 data = load_run(path)
                 final_cost = data["solution"]["working_time"]
                 pac = data["pull_accept_count"]
                 poc = data["pull_offer_count"]
+                cps = data.get("best_solution_cost_by_evaluation_checkpoint")
 
                 run_rpd = rpd_pct(final_cost, bks_value)
                 run_ar_pct = pac / poc * 100.0 if poc else None
@@ -109,6 +125,9 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
                     rpds.append(run_rpd)
                 accept_counts.append(pac)
                 offer_counts.append(poc)
+                if cps is not None and len(cps) == NUM_CHECKPOINTS:
+                    run_r = [rpd_pct(v, bks_value) for v in cps]
+                    irpds_per_run.append(irpd_pct(run_r))
 
                 detail_rows.append({
                     "n": n, "instance": instance, "pull_strategy": pull_strategy,
@@ -127,13 +146,14 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
             total_offer = sum(offer_counts)
             if accept_strategy == "selective" and total_offer:
                 ar_pct = sum(accept_counts) / total_offer * 100.0
+            irpd = mean_or_none(irpds_per_run)
 
-            per_accept[accept_strategy] = {"runs": len(run_files), "rpd": rpd, "ar_pct": ar_pct}
+            per_accept[accept_strategy] = {"runs": len(run_files), "rpd": rpd, "ar_pct": ar_pct, "irpd": irpd}
             summary_rows.append({
                 "n": n, "instance": instance, "pull_strategy": pull_strategy,
                 "accept_strategy": accept_strategy, "bks": bks_value,
                 "runs": len(run_files), "expected_runs": expected_runs,
-                "rpd_pct": rpd, "accept_rate_pct": ar_pct,
+                "rpd_pct": rpd, "irpd_pct": irpd, "accept_rate_pct": ar_pct,
             })
 
         always = per_accept["always"]
@@ -149,6 +169,7 @@ def compute_instance(outputs_dir: Path, bks_dir: Path, n: str, combo: str, expec
             "expected_runs": expected_runs,
             "always_rpd_pct": always["rpd"], "selective_rpd_pct": selective["rpd"],
             "delta_acc_pct": delta_acc, "selective_ar_pct": selective["ar_pct"],
+            "always_irpd_pct": always["irpd"], "selective_irpd_pct": selective["irpd"],
         })
     return summary_rows, detail_rows, instance_rows
 
@@ -214,13 +235,13 @@ def main():
 
     # ---- Per-instance-per-(pull,accept) summary ----
     header = (f"{'Instance':<12}{'Pull':<12}{'Accept':<11}{'Runs':>6}"
-              f"{'RPD(%)':>11}{'AR(%)':>10}")
+              f"{'RPD(%)':>11}{'IRPD(%)':>10}{'AR(%)':>10}")
     out(header)
     out("-" * len(header))
     incomplete = []
     for r in summary_rows:
         out(f"{r['instance']:<12}{r['pull_strategy']:<12}{r['accept_strategy']:<11}{r['runs']:>6}"
-            f"{fmt(r['rpd_pct'], 3):>11}{fmt(r['accept_rate_pct'], 3):>10}")
+            f"{fmt(r['rpd_pct'], 3):>11}{fmt(r['irpd_pct'], 3):>10}{fmt(r['accept_rate_pct'], 3):>10}")
         if r["runs"] < r["expected_runs"]:
             incomplete.append(
                 f"{r['instance']}/{r['pull_strategy']}-{r['accept_strategy']} ({r['runs']}/{r['expected_runs']})")
@@ -229,17 +250,20 @@ def main():
 
     # ---- Per-instance-per-pull_strategy: always vs selective + delta_acc ----
     out(f"\n{'Instance':<12}{'Pull':<12}{'AlwaysRPD(%)':>14}{'SelectRPD(%)':>14}"
-        f"{'DeltaAcc(%)':>13}{'SelectAR(%)':>13}")
-    out("-" * 78)
+        f"{'DeltaAcc(%)':>13}{'SelectAR(%)':>13}"
+        f"{'AlwaysIRPD(%)':>15}{'SelectIRPD(%)':>15}")
+    out("-" * 108)
     for r in instance_rows:
         out(f"{r['instance']:<12}{r['pull_strategy']:<12}"
             f"{fmt(r['always_rpd_pct'], 3):>14}{fmt(r['selective_rpd_pct'], 3):>14}"
-            f"{fmt(r['delta_acc_pct'], 3):>13}{fmt(r['selective_ar_pct'], 3):>13}")
+            f"{fmt(r['delta_acc_pct'], 3):>13}{fmt(r['selective_ar_pct'], 3):>13}"
+            f"{fmt(r['always_irpd_pct'], 3):>15}{fmt(r['selective_irpd_pct'], 3):>15}")
 
     # ---- Aggregate: instance -> pull_strategy (avg over instances) ----
     out(f"\n{'PullStrategy':<14}{'AlwaysRPD(%)':>14}{'SelectRPD(%)':>14}"
-        f"{'DeltaAcc(%)':>13}{'SelectAR(%)':>13}")
-    out("-" * 68)
+        f"{'DeltaAcc(%)':>13}{'SelectAR(%)':>13}"
+        f"{'AlwaysIRPD(%)':>15}{'SelectIRPD(%)':>15}")
+    out("-" * 98)
     strategy_rows = []
     for pull_strategy in PULL_STRATEGIES:
         rows = [r for r in instance_rows if r["pull_strategy"] == pull_strategy]
@@ -252,15 +276,19 @@ def main():
         selective_rpd = avg_field("selective_rpd_pct")
         delta_acc = (always_rpd - selective_rpd) if always_rpd is not None and selective_rpd is not None else None
         selective_ar = avg_field("selective_ar_pct")
+        always_irpd = avg_field("always_irpd_pct")
+        selective_irpd = avg_field("selective_irpd_pct")
 
         strategy_row = {
             "pull_strategy": pull_strategy,
             "always_rpd_pct": always_rpd, "selective_rpd_pct": selective_rpd,
             "delta_acc_pct": delta_acc, "selective_ar_pct": selective_ar,
+            "always_irpd_pct": always_irpd, "selective_irpd_pct": selective_irpd,
         }
         strategy_rows.append(strategy_row)
         out(f"{pull_strategy:<14}{fmt(always_rpd, 3):>14}{fmt(selective_rpd, 3):>14}"
-            f"{fmt(delta_acc, 3):>13}{fmt(selective_ar, 3):>13}")
+            f"{fmt(delta_acc, 3):>13}{fmt(selective_ar, 3):>13}"
+            f"{fmt(always_irpd, 3):>15}{fmt(selective_irpd, 3):>15}")
 
     report = "\n".join(lines)
     print(report)
