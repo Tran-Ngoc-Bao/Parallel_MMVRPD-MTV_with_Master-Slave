@@ -4,50 +4,50 @@
 #include <stdexcept>
 
 // -----------------------------------------------------------------------
-// TruckRoute::make
+// Route evaluation (shared by make() and the neighbourhoods)
 // -----------------------------------------------------------------------
-LocalRc<TruckRoute> TruckRoute::make(std::vector<size_t> customers)
+RouteVals evaluate_truck(const std::vector<size_t>& c)
 {
     const Config& cfg = global_config();
-    auto r = LocalRc<TruckRoute>::make(TruckRoute::PrivateTag{});
-    r->_data = RouteData::construct(std::move(customers), cfg.truck_distances);
+    const auto& d = cfg.truck_distances;
+    RouteVals v;
+    for (size_t i = 0; i + 1 < c.size(); ++i) {
+        v.distance += d[c[i]][c[i+1]];
+        v.weight   += cfg.demands[c[i]];
+    }
 
     double speed = cfg.truck.speed;
-    r->_working_time       = r->_data.distance / speed;
-    r->_capacity_violation = std::max(0.0, r->_data.weight - cfg.truck.capacity);
+    v.working_time       = v.distance / speed;
+    v.capacity_violation = std::max(0.0, v.weight - cfg.truck.capacity);
 
     // Waiting time violation
     double wtv    = 0.0;
     double accum  = 0.0;
-    const auto& d = cfg.truck_distances;
-    const auto& c = r->_data.customers;
     for (size_t i = 1; i + 1 < c.size(); ++i) {
         accum += d[c[i-1]][c[i]] / speed;
-        wtv   += std::max(0.0, r->_working_time - accum - cfg.waiting_time_limit);
+        wtv   += std::max(0.0, v.working_time - accum - cfg.waiting_time_limit);
     }
-    r->_waiting_time_violation = wtv;
-    return r;
+    v.waiting_time_violation = wtv;
+    return v;
 }
 
-// -----------------------------------------------------------------------
-// DroneRoute::make
-// -----------------------------------------------------------------------
-LocalRc<DroneRoute> DroneRoute::make(std::vector<size_t> customers)
+RouteVals evaluate_drone(const std::vector<size_t>& c)
 {
     const Config& cfg = global_config();
-    auto r = LocalRc<DroneRoute>::make(DroneRoute::PrivateTag{});
-    r->_data = RouteData::construct(std::move(customers), cfg.drone_distances);
-
     const DroneConfig& drone = cfg.drone;
-    const auto& c   = r->_data.customers;
-    const auto& dist= cfg.drone_distances;
+    const auto& dist = cfg.drone_distances;
+    RouteVals v;
+    for (size_t i = 0; i + 1 < c.size(); ++i) {
+        v.distance += dist[c[i]][c[i+1]];
+        v.weight   += cfg.demands[c[i]];
+    }
 
     double takeoff  = drone.takeoff_time();
     double landing  = drone.landing_time();
 
-    r->_working_time = (takeoff + landing) * static_cast<double>(c.size() - 1)
-                       + drone.cruise_time(r->_data.distance);
-    r->_capacity_violation = std::max(0.0, r->_data.weight - drone.capacity());
+    v.working_time = (takeoff + landing) * static_cast<double>(c.size() - 1)
+                     + drone.cruise_time(v.distance);
+    v.capacity_violation = std::max(0.0, v.weight - drone.capacity());
 
     double time   = 0.0;
     double energy = 0.0;
@@ -61,12 +61,48 @@ LocalRc<DroneRoute> DroneRoute::make(std::vector<size_t> customers)
                 + drone.takeoff_power(weight) * takeoff
                 + drone.cruise_power(weight)  * cruise;
         weight += cfg.demands[c[i]];
-        wtv    += std::max(0.0, r->_working_time - time - cfg.waiting_time_limit);
+        wtv    += std::max(0.0, v.working_time - time - cfg.waiting_time_limit);
     }
 
-    r->energy_violation       = std::max(0.0, energy - drone.battery());
-    r->fixed_time_violation   = std::max(0.0, r->_working_time - drone.fixed_time());
-    r->_waiting_time_violation= wtv;
+    v.energy_violation       = std::max(0.0, energy - drone.battery());
+    v.fixed_time_violation   = std::max(0.0, v.working_time - drone.fixed_time());
+    v.waiting_time_violation = wtv;
+    return v;
+}
+
+// -----------------------------------------------------------------------
+// TruckRoute::make
+// -----------------------------------------------------------------------
+LocalRc<TruckRoute> TruckRoute::make(std::vector<size_t> customers)
+{
+    assert(customers.front() == 0 && customers.back() == 0 && customers.size() >= 3);
+    auto r = LocalRc<TruckRoute>::make(TruckRoute::PrivateTag{});
+    const RouteVals v = evaluate_truck(customers);
+    r->_data.customers           = std::move(customers);
+    r->_data.distance            = v.distance;
+    r->_data.weight              = v.weight;
+    r->_working_time             = v.working_time;
+    r->_capacity_violation       = v.capacity_violation;
+    r->_waiting_time_violation   = v.waiting_time_violation;
+    return r;
+}
+
+// -----------------------------------------------------------------------
+// DroneRoute::make
+// -----------------------------------------------------------------------
+LocalRc<DroneRoute> DroneRoute::make(std::vector<size_t> customers)
+{
+    assert(customers.front() == 0 && customers.back() == 0 && customers.size() >= 3);
+    auto r = LocalRc<DroneRoute>::make(DroneRoute::PrivateTag{});
+    const RouteVals v = evaluate_drone(customers);
+    r->_data.customers           = std::move(customers);
+    r->_data.distance            = v.distance;
+    r->_data.weight              = v.weight;
+    r->_working_time             = v.working_time;
+    r->_capacity_violation       = v.capacity_violation;
+    r->_waiting_time_violation   = v.waiting_time_violation;
+    r->energy_violation          = v.energy_violation;
+    r->fixed_time_violation      = v.fixed_time_violation;
     return r;
 }
 

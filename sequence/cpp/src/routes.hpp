@@ -40,6 +40,22 @@ struct RouteData {
     }
 };
 
+// RouteVals: what TruckRoute::make / DroneRoute::make compute, without building a route
+// (evaluate_truck / evaluate_drone, also used by make()).
+struct RouteVals {
+    double distance               = 0.0;
+    double weight                 = 0.0;
+    double working_time           = 0.0;
+    double capacity_violation     = 0.0;
+    double waiting_time_violation = 0.0;
+    double energy_violation       = 0.0;   // drones only
+    double fixed_time_violation   = 0.0;   // drones only
+};
+
+// customers: the route, depot at both ends.
+RouteVals evaluate_truck(const std::vector<size_t>& customers);
+RouteVals evaluate_drone(const std::vector<size_t>& customers);
+
 // -----------------------------------------------------------------------
 // Abstract base
 // -----------------------------------------------------------------------
@@ -126,6 +142,7 @@ public:
                     route.insert(route.end(), queue.begin(), queue.end());
                     route.push_back(0);
 
+                    // Not sorted, unlike intra_route's keys (see Search note in neighborhoods.cpp).
                     std::vector<size_t> tabu(customers.begin() + (i - sz + 1), customers.begin() + i + 1);
                     results.emplace_back(
                         RouteHelper<Derived>::make(original),
@@ -139,25 +156,20 @@ public:
         return results;
     }
 
-    // ---- inter_route ----
-    template<typename T>
-    std::vector<std::tuple<
-        std::optional<LocalRc<Derived>>,
-        std::optional<LocalRc<T>>,
-        std::vector<size_t>>>
-    inter_route(LocalRc<T> other, Neighborhood n) const
+    // ---- inter_route_visit ----
+    // Calls visit(vd, rd, vt, rt, tabu, tabu_size) per neighbour: rd / rt = new route of this
+    // route / of `other` (nullptr if removed) in the caller's buffers bi / bj, vd / vt its RouteVals.
+    template<typename T, typename Visit>
+    void inter_route_visit(const LocalRc<T>& other, Neighborhood n,
+                           std::vector<size_t>& bi, std::vector<size_t>& bj,
+                           Visit&& visit) const
     {
-        using Opt_D = std::optional<LocalRc<Derived>>;
-        using Opt_T = std::optional<LocalRc<T>>;
-        using Ret   = std::tuple<Opt_D, Opt_T, std::vector<size_t>>;
-        std::vector<Ret> results;
-
         const auto& ci = data().customers;
         const auto& cj = other->data().customers;
         size_t li = ci.size(), lj = cj.size();
 
-        auto bi = ci; // mutable buffer_i
-        auto bj = cj; // mutable buffer_j
+        bi.assign(ci.begin(), ci.end());
+        bj.assign(cj.begin(), cj.end());
 
         switch (n) {
         case Neighborhood::Move10:
@@ -165,11 +177,14 @@ public:
                 if (!RouteHelper<T>::servable(ci[idx_i])) continue;
                 size_t removed = bi[idx_i];
                 bi.erase(bi.begin() + static_cast<ptrdiff_t>(idx_i));
-                Opt_D ri = (li == 3) ? Opt_D{} : Opt_D{RouteHelper<Derived>::make(bi)};
-                std::vector<size_t> tabu = {removed};
+                RouteVals vi;
+                const std::vector<size_t>* ri = nullptr;
+                if (li != 3) { vi = RouteHelper<Derived>::evaluate(bi); ri = &bi; }
+                const size_t tabu[] = {removed};
                 bj.insert(bj.begin() + 1, removed);
                 for (size_t idx_j = 1; idx_j < lj; ++idx_j) {
-                    results.emplace_back(ri, Opt_T{RouteHelper<T>::make(bj)}, tabu);
+                    const RouteVals vj = RouteHelper<T>::evaluate(bj);
+                    visit(ri ? &vi : nullptr, ri, &vj, &bj, tabu, size_t{1});
                     std::swap(bj[idx_j], bj[idx_j+1]);
                 }
                 bi.insert(bi.begin() + static_cast<ptrdiff_t>(idx_i), removed);
@@ -183,11 +198,10 @@ public:
                 for (size_t idx_j = 1; idx_j + 1 < lj; ++idx_j) {
                     if (!RouteHelper<Derived>::servable(bj[idx_j])) continue;
                     std::swap(bi[idx_i], bj[idx_j]);
-                    std::vector<size_t> tabu = {ci[idx_i], cj[idx_j]};
-                    results.emplace_back(
-                        Opt_D{RouteHelper<Derived>::make(bi)},
-                        Opt_T{RouteHelper<T>::make(bj)},
-                        tabu);
+                    const size_t tabu[] = {ci[idx_i], cj[idx_j]};
+                    const RouteVals vi = RouteHelper<Derived>::evaluate(bi);
+                    const RouteVals vj = RouteHelper<T>::evaluate(bj);
+                    visit(&vi, &bi, &vj, &bj, tabu, size_t{2});
                     std::swap(bi[idx_i], bj[idx_j]);
                 }
             }
@@ -201,12 +215,15 @@ public:
                 bi.erase(bi.begin() + static_cast<ptrdiff_t>(idx_i));
                 size_t ry = bi[idx_i];
                 bi.erase(bi.begin() + static_cast<ptrdiff_t>(idx_i));
-                Opt_D ri = (li == 4) ? Opt_D{} : Opt_D{RouteHelper<Derived>::make(bi)};
-                std::vector<size_t> tabu = {rx, ry};
+                RouteVals vi;
+                const std::vector<size_t>* ri = nullptr;
+                if (li != 4) { vi = RouteHelper<Derived>::evaluate(bi); ri = &bi; }
+                const size_t tabu[] = {rx, ry};
                 bj.insert(bj.begin()+1, rx);
                 bj.insert(bj.begin()+2, ry);
                 for (size_t idx_j = 1; idx_j < lj; ++idx_j) {
-                    results.emplace_back(ri, Opt_T{RouteHelper<T>::make(bj)}, tabu);
+                    const RouteVals vj = RouteHelper<T>::evaluate(bj);
+                    visit(ri ? &vi : nullptr, ri, &vj, &bj, tabu, size_t{2});
                     std::swap(bj[idx_j+1], bj[idx_j+2]);
                     std::swap(bj[idx_j],   bj[idx_j+1]);
                 }
@@ -225,11 +242,10 @@ public:
                 bi.erase(bi.begin() + static_cast<ptrdiff_t>(idx_i+1));
                 for (size_t idx_j = 1; idx_j + 1 < lj; ++idx_j) {
                     if (RouteHelper<Derived>::servable(bj[idx_j])) {
-                        std::vector<size_t> tabu = {bj[idx_j], bj[idx_j+1], bi[idx_i]};
-                        results.emplace_back(
-                            Opt_D{RouteHelper<Derived>::make(bi)},
-                            Opt_T{RouteHelper<T>::make(bj)},
-                            tabu);
+                        const size_t tabu[] = {bj[idx_j], bj[idx_j+1], bi[idx_i]};
+                        const RouteVals vi = RouteHelper<Derived>::evaluate(bi);
+                        const RouteVals vj = RouteHelper<T>::evaluate(bj);
+                        visit(&vi, &bi, &vj, &bj, tabu, size_t{3});
                     }
                     std::swap(bi[idx_i], bj[idx_j+2]);
                     std::swap(bj[idx_j+1], bj[idx_j+2]);
@@ -251,11 +267,10 @@ public:
                     std::swap(bi[idx_i],   bj[idx_j]);
                     std::swap(bi[idx_i+1], bj[idx_j+1]);
                     // tabu uses the swapped values: after swap, bi has what was in bj and vice-versa
-                    std::vector<size_t> tabu = {bi[idx_i], bi[idx_i+1], bj[idx_j], bj[idx_j+1]};
-                    results.emplace_back(
-                        Opt_D{RouteHelper<Derived>::make(bi)},
-                        Opt_T{RouteHelper<T>::make(bj)},
-                        tabu);
+                    const size_t tabu[] = {bi[idx_i], bi[idx_i+1], bj[idx_j], bj[idx_j+1]};
+                    const RouteVals vi = RouteHelper<Derived>::evaluate(bi);
+                    const RouteVals vj = RouteHelper<T>::evaluate(bj);
+                    visit(&vi, &bi, &vj, &bj, tabu, size_t{4});
                     std::swap(bi[idx_i],   bj[idx_j]);
                     std::swap(bi[idx_i+1], bj[idx_j+1]);
                 }
@@ -269,15 +284,14 @@ public:
             while (off_j > 1 && RouteHelper<Derived>::servable(cj[off_j-1])) --off_j;
             for (size_t idx_i = off_i; idx_i + 1 < li; ++idx_i) {
                 for (size_t idx_j = off_j; idx_j + 1 < lj; ++idx_j) {
-                    std::vector<size_t> ni(ci.begin(), ci.begin()+idx_i);
-                    std::vector<size_t> nj(cj.begin(), cj.begin()+idx_j);
-                    ni.insert(ni.end(), cj.begin()+idx_j, cj.end());
-                    nj.insert(nj.end(), ci.begin()+idx_i, ci.end());
-                    std::vector<size_t> tabu = {ni[idx_i], nj[idx_j]};
-                    results.emplace_back(
-                        Opt_D{RouteHelper<Derived>::make(ni)},
-                        Opt_T{RouteHelper<T>::make(nj)},
-                        tabu);
+                    bi.assign(ci.begin(), ci.begin()+idx_i);
+                    bj.assign(cj.begin(), cj.begin()+idx_j);
+                    bi.insert(bi.end(), cj.begin()+idx_j, cj.end());
+                    bj.insert(bj.end(), ci.begin()+idx_i, ci.end());
+                    const size_t tabu[] = {bi[idx_i], bj[idx_j]};
+                    const RouteVals vi = RouteHelper<Derived>::evaluate(bi);
+                    const RouteVals vj = RouteHelper<T>::evaluate(bj);
+                    visit(&vi, &bi, &vj, &bj, tabu, size_t{2});
                 }
             }
             break;
@@ -286,7 +300,6 @@ public:
         default:
             throw std::runtime_error("inter_route: invalid neighborhood");
         }
-        return results;
     }
 
     // ---- inter_route_3 (EjectionChain only) ----
@@ -323,6 +336,7 @@ public:
                 bj[idx_j] = remove_x;
 
                 for (size_t idx_k = 1; idx_k < lk; ++idx_k) {
+                    // Not sorted, unlike intra_route's keys (see Search note in neighborhoods.cpp).
                     std::vector<size_t> tabu = {remove_x, bk[idx_k]};
                     Opt_D pi = (bi.size() == 2) ? Opt_D{} : Opt_D{RouteHelper<Derived>::make(bi)};
                     results.emplace_back(pi,
@@ -584,6 +598,7 @@ template<> struct RouteHelper<TruckRoute> {
     static LocalRc<TruckRoute> make(std::vector<size_t> c) {
         return TruckRoute::make(std::move(c));
     }
+    static RouteVals evaluate(const std::vector<size_t>& c) { return evaluate_truck(c); }
     static std::vector<std::vector<LocalRc<TruckRoute>>>& get_routes_mut(
         std::vector<std::vector<LocalRc<TruckRoute>>>& tr,
         std::vector<std::vector<LocalRc<DroneRoute>>>& dr) {
@@ -603,6 +618,7 @@ template<> struct RouteHelper<DroneRoute> {
     static LocalRc<DroneRoute> make(std::vector<size_t> c) {
         return DroneRoute::make(std::move(c));
     }
+    static RouteVals evaluate(const std::vector<size_t>& c) { return evaluate_drone(c); }
     static std::vector<std::vector<LocalRc<DroneRoute>>>& get_routes_mut(
         std::vector<std::vector<LocalRc<TruckRoute>>>& tr,
         std::vector<std::vector<LocalRc<DroneRoute>>>& dr) {

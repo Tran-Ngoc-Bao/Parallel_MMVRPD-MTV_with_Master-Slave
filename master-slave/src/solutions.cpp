@@ -128,26 +128,16 @@ Solution Solution::make(
 // -----------------------------------------------------------------------
 // Solution::update_delta_inplace
 // -----------------------------------------------------------------------
-void Solution::update_delta_inplace(
-    Solution& scratch,
-    const Solution& base,
-    std::vector<std::vector<LocalRc<TruckRoute>>> new_truck_routes,
-    std::vector<std::vector<LocalRc<DroneRoute>>> new_drone_routes)
+// Body of both update_delta_inplace overloads: truck_same(t) /
+// drone_same(d) tell whether vehicle t / d has base's route list.
+template<typename TruckSame, typename DroneSame>
+static void update_delta_body(Solution& scratch, const Solution& base,
+                              TruckSame truck_same, DroneSame drone_same)
 {
     const Config& cfg = global_config();
 
-    scratch.truck_routes = std::move(new_truck_routes);
-    scratch.drone_routes = std::move(new_drone_routes);
-
-    auto same_routes = [](const auto& a, const auto& b) {
-        if (a.size() != b.size()) return false;
-        for (size_t i = 0; i < a.size(); ++i)
-            if (!(a[i] == b[i])) return false;
-        return true;
-    };
-
     for (size_t t = 0; t < scratch.truck_routes.size(); ++t) {
-        if (same_routes(scratch.truck_routes[t], base.truck_routes[t])) {
+        if (truck_same(t)) {
             scratch.truck_working_time[t]       = base.truck_working_time[t];
             scratch.truck_capacity_violation[t] = base.truck_capacity_violation[t];
             scratch.truck_waiting_violation[t]  = base.truck_waiting_violation[t];
@@ -165,7 +155,7 @@ void Solution::update_delta_inplace(
     }
 
     for (size_t d = 0; d < scratch.drone_routes.size(); ++d) {
-        if (same_routes(scratch.drone_routes[d], base.drone_routes[d])) {
+        if (drone_same(d)) {
             scratch.drone_working_time[d]       = base.drone_working_time[d];
             scratch.drone_capacity_violation[d] = base.drone_capacity_violation[d];
             scratch.drone_waiting_violation[d]  = base.drone_waiting_violation[d];
@@ -216,10 +206,50 @@ void Solution::update_delta_inplace(
                          fixed_time_violation   == 0.0);
 }
 
+void Solution::update_delta_inplace(
+    Solution& scratch,
+    const Solution& base,
+    std::vector<std::vector<LocalRc<TruckRoute>>> new_truck_routes,
+    std::vector<std::vector<LocalRc<DroneRoute>>> new_drone_routes)
+{
+    scratch.truck_routes = std::move(new_truck_routes);
+    scratch.drone_routes = std::move(new_drone_routes);
+
+    auto same_routes = [](const auto& a, const auto& b) {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i)
+            if (!(a[i] == b[i])) return false;
+        return true;
+    };
+    update_delta_body(scratch, base,
+        [&](size_t t) { return same_routes(scratch.truck_routes[t], base.truck_routes[t]); },
+        [&](size_t d) { return same_routes(scratch.drone_routes[d], base.drone_routes[d]); });
+}
+
+void Solution::update_delta_inplace(
+    Solution& scratch,
+    const Solution& base,
+    std::vector<std::vector<LocalRc<TruckRoute>>> new_truck_routes,
+    std::vector<std::vector<LocalRc<DroneRoute>>> new_drone_routes,
+    const size_t (&changed_truck)[2],
+    const size_t (&changed_drone)[2])
+{
+    scratch.truck_routes = std::move(new_truck_routes);
+    scratch.drone_routes = std::move(new_drone_routes);
+
+    // A vehicle recomputed although unchanged gets the same value as base's
+    // cache (same routes, same summation), so listing one too many is safe.
+    update_delta_body(scratch, base,
+        [&](size_t t) { return t != changed_truck[0] && t != changed_truck[1]; },
+        [&](size_t d) { return d != changed_drone[0] && d != changed_drone[1]; });
+}
+
 // -----------------------------------------------------------------------
 // cost()
 // -----------------------------------------------------------------------
-double Solution::cost() const {
+double Solution::penalized_cost(double working_time, double energy_violation,
+                                double capacity_violation, double waiting_time_violation,
+                                double fixed_time_violation) {
     double p = 1.0
         + penalty::get(0) * energy_violation
         + penalty::get(1) * capacity_violation
@@ -227,6 +257,11 @@ double Solution::cost() const {
         + penalty::get(3) * fixed_time_violation;
     const double exp = global_config().penalty_exponent;
     return working_time * (exp == 0.5 ? std::sqrt(p) : std::pow(p, exp));
+}
+
+double Solution::cost() const {
+    return penalized_cost(working_time, energy_violation, capacity_violation,
+                          waiting_time_violation, fixed_time_violation);
 }
 
 // -----------------------------------------------------------------------
@@ -962,6 +997,8 @@ Solution Solution::tabu_search(Solution root, Logger& logger, const EliteHooks* 
     for (const auto& r : root.drone_routes) if (!r.empty()) ++total_vehicle;
     if (total_vehicle == 0) total_vehicle = 1;
 
+    // Customers per vehicle used in the initial solution (not per trip):
+    // scales the tabu tenure, the adaptive segment length and reset_after.
     double base     = static_cast<double>(cfg.customers_count) / total_vehicle;
     size_t tabu_sz  = static_cast<size_t>(cfg.tabu_size_factor * base);
     size_t adap_its = static_cast<size_t>(cfg.adaptive_iterations * base);

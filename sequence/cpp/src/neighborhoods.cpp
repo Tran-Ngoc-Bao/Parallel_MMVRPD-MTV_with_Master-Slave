@@ -4,6 +4,7 @@
 #include <limits>
 #include <algorithm>
 #include <stdexcept>
+#include <type_traits>
 
 // -----------------------------------------------------------------------
 // Helper: find the vehicle with the largest working time
@@ -69,6 +70,172 @@ static bool internal_update(IterState& st, const Solution& sol, Tabu&& tabu)
     return false;
 }
 
+// Tabu note (inherited from the Rust version, kept): stored keys and intra-route keys
+// are sorted, inter-route keys are checked unsorted, so multi-customer inter-route
+// moves are only partly tabu. Sorting them was tried: worse with the current parameters.
+
+// Passes a route type to a generic lambda (C++17 has no template lambdas).
+template<typename T> struct Tag { using type = T; };
+
+// Neighbour scoring without building the solution: same operations, same order as
+// update_delta_inplace on the (at most two) changed vehicles, so the same cost to the
+// bit. Only a neighbour that becomes the best one is built.
+template<typename R> static RouteVals vals_of(const R& r);
+template<> RouteVals vals_of(const TruckRoute& r) {
+    RouteVals v;
+    v.working_time           = r.working_time();
+    v.capacity_violation     = r.capacity_violation();
+    v.waiting_time_violation = r.waiting_time_violation();
+    return v;
+}
+template<> RouteVals vals_of(const DroneRoute& r) {
+    RouteVals v;
+    v.working_time           = r.working_time();
+    v.capacity_violation     = r.capacity_violation();
+    v.waiting_time_violation = r.waiting_time_violation();
+    v.energy_violation       = r.energy_violation;
+    v.fixed_time_violation   = r.fixed_time_violation;
+    return v;
+}
+
+// Per-vehicle sums, as in update_delta_inplace (cv already divided by the
+// capacity route by route).
+struct VehicleSum { double wt = 0, cv = 0, wv = 0, ev = 0, fv = 0; };
+
+template<typename R> static VehicleSum sum_vehicle(const std::vector<RouteVals>& routes);
+template<> VehicleSum sum_vehicle<TruckRoute>(const std::vector<RouteVals>& routes) {
+    const Config& cfg = global_config();
+    VehicleSum s;
+    for (const auto& r : routes) {
+        s.wt += r.working_time;
+        s.cv += r.capacity_violation / cfg.truck.capacity;
+        s.wv += r.waiting_time_violation;
+    }
+    return s;
+}
+template<> VehicleSum sum_vehicle<DroneRoute>(const std::vector<RouteVals>& routes) {
+    const Config& cfg = global_config();
+    VehicleSum s;
+    for (const auto& r : routes) {
+        s.wt += r.working_time;
+        s.ev += r.energy_violation;
+        s.cv += r.capacity_violation / cfg.drone.capacity();
+        s.wv += r.waiting_time_violation;
+        s.fv += r.fixed_time_violation;
+    }
+    return s;
+}
+
+// Totals of `base` with up to two vehicles replaced: (truck?, index, sums).
+struct VehicleSub { bool truck; size_t index; VehicleSum sum; };
+
+struct Totals {
+    double working_time, energy_violation, capacity_violation,
+           waiting_time_violation, fixed_time_violation;
+    bool feasible;
+};
+
+// update_delta_inplace's totals for base with 1-2 vehicles replaced: sums restart from
+// base's partial sum before the first replaced vehicle (same additions, same bits);
+// the max working time uses base's three largest values.
+class BaseTotals {
+public:
+    explicit BaseTotals(const Solution& base)
+        : nt_(base.truck_working_time.size()), nd_(base.drone_working_time.size())
+    {
+        for (size_t t = 0; t < nt_; ++t) {
+            wt_.push_back(base.truck_working_time[t]);
+            cv_.push_back(base.truck_capacity_violation[t]);
+            wv_.push_back(base.truck_waiting_violation[t]);
+        }
+        for (size_t d = 0; d < nd_; ++d) {
+            wt_.push_back(base.drone_working_time[d]);
+            cv_.push_back(base.drone_capacity_violation[d]);
+            wv_.push_back(base.drone_waiting_violation[d]);
+            ev_.push_back(base.drone_energy_violation[d]);
+            fv_.push_back(base.drone_fixed_violation[d]);
+        }
+        auto prefix = [](const std::vector<double>& v) {
+            std::vector<double> p(v.size() + 1, 0.0);
+            for (size_t k = 0; k < v.size(); ++k) p[k + 1] = p[k] + v[k];
+            return p;
+        };
+        cv_pre_ = prefix(cv_); wv_pre_ = prefix(wv_);
+        ev_pre_ = prefix(ev_); fv_pre_ = prefix(fv_);
+
+        // Positions of the three largest working times.
+        for (size_t k = 0; k < wt_.size(); ++k) {
+            size_t c = k;
+            for (int r = 0; r < 3; ++r) {
+                if (r >= ntop_) { top_[r] = c; ntop_ = r + 1; break; }
+                if (wt_[c] > wt_[top_[r]]) std::swap(c, top_[r]);
+            }
+        }
+    }
+
+    Totals with(const VehicleSub* subs, size_t nsubs) const
+    {
+        const Config& cfg = global_config();
+        size_t pos[2];   // position in trucks-then-drones order
+        for (size_t k = 0; k < nsubs; ++k) pos[k] = subs[k].truck ? subs[k].index : nt_ + subs[k].index;
+        auto sub_at = [&](size_t k) -> const VehicleSum* {
+            for (size_t s = 0; s < nsubs; ++s) if (pos[s] == k) return &subs[s].sum;
+            return nullptr;
+        };
+
+        // Working time: max of the vehicles not replaced, then of the replaced ones.
+        double working_time = 0.0;
+        for (int r = 0; r < ntop_; ++r) {
+            if (sub_at(top_[r])) continue;
+            working_time = wt_[top_[r]];
+            break;
+        }
+        for (size_t s = 0; s < nsubs; ++s) working_time = std::max(working_time, subs[s].sum.wt);
+
+        // Trucks-then-drones sums (capacity, waiting time).
+        size_t first = pos[0];
+        for (size_t s = 1; s < nsubs; ++s) first = std::min(first, pos[s]);
+        double capacity_violation = cv_pre_[first], waiting_time_violation = wv_pre_[first];
+        for (size_t k = first; k < wt_.size(); ++k) {
+            const VehicleSum* s = sub_at(k);
+            capacity_violation += s ? s->cv : cv_[k];
+        }
+        for (size_t k = first; k < wt_.size(); ++k) {
+            const VehicleSum* s = sub_at(k);
+            waiting_time_violation += s ? s->wv : wv_[k];
+        }
+
+        // Drones-only sums (energy, fixed time).
+        size_t first_d = nd_;
+        for (size_t s = 0; s < nsubs; ++s) if (!subs[s].truck) first_d = std::min(first_d, subs[s].index);
+        double energy_violation = ev_pre_[first_d], fixed_time_violation = fv_pre_[first_d];
+        for (size_t d = first_d; d < nd_; ++d) {
+            const VehicleSum* s = sub_at(nt_ + d);
+            energy_violation += s ? s->ev : ev_[d];
+        }
+        for (size_t d = first_d; d < nd_; ++d) {
+            const VehicleSum* s = sub_at(nt_ + d);
+            fixed_time_violation += s ? s->fv : fv_[d];
+        }
+
+        energy_violation       /= cfg.drone.battery();
+        waiting_time_violation /= cfg.waiting_time_limit;
+        fixed_time_violation   /= cfg.drone.fixed_time();
+
+        return {working_time, energy_violation, capacity_violation, waiting_time_violation,
+                fixed_time_violation,
+                energy_violation == 0.0 && capacity_violation == 0.0 &&
+                waiting_time_violation == 0.0 && fixed_time_violation == 0.0};
+    }
+
+private:
+    size_t nt_, nd_;
+    std::vector<double> wt_, cv_, wv_, ev_, fv_;               // trucks then drones (ev, fv: drones)
+    std::vector<double> cv_pre_, wv_pre_, ev_pre_, fv_pre_;    // partial sums from 0.0
+    size_t top_[3] = {0, 0, 0};
+    int    ntop_ = 0;
+};
+
 // -----------------------------------------------------------------------
 // inter_route_internal<RI>
 //   Iterates over routes of vehicle_i (type RI) and pairs them with every
@@ -84,14 +251,30 @@ static void inter_route_internal(
 {
     const auto& orig_ri = RouteHelper<RI>::get_routes(
         st.original.truck_routes, st.original.drone_routes);
+    constexpr bool ri_truck = std::is_same_v<RI, TruckRoute>;
 
     bool asymmetric = (n == Neighborhood::Move10 ||
                        n == Neighborhood::Move20 ||
                        n == Neighborhood::Move21);
 
+    // Scratch reused across neighbours.
+    std::vector<size_t> bi, bj;                 // routes being generated
+    std::vector<RouteVals> vals_i, vals_j;      // RouteVals of vehicle_i / vehicle_j routes
+    std::vector<RouteVals> list_i, list_j;      // the same after the move
+    std::vector<size_t> tabu_buf;
+    vals_i.clear();
+    for (const auto& r : orig_ri[vehicle_i]) vals_i.push_back(vals_of(*r));
+    const BaseTotals base_totals(st.original);
+
+    auto swap_remove_vals = [](std::vector<RouteVals>& v, size_t idx) {
+        if (idx != v.size() - 1) v[idx] = v.back();
+        v.pop_back();
+    };
+
     // Helper lambda: iterate route_j over type RJ
     auto iterate_j = [&](auto rj_tag) {
         using RJ = typename decltype(rj_tag)::type;
+        constexpr bool rj_truck = std::is_same_v<RJ, TruckRoute>;
         const auto& orig_rj = RouteHelper<RJ>::get_routes(
             st.original.truck_routes, st.original.drone_routes);
 
@@ -99,99 +282,119 @@ static void inter_route_internal(
             const auto& route_i = orig_ri[vehicle_i][ri_idx];
 
             for (size_t vehicle_j = 0; vehicle_j < orig_rj.size(); ++vehicle_j) {
+                const bool same_list = std::is_same_v<RI, RJ> && vehicle_i == vehicle_j;
+                vals_j.clear();
+                for (const auto& r : orig_rj[vehicle_j]) vals_j.push_back(vals_of(*r));
+
                 for (size_t rj_idx = 0; rj_idx < orig_rj[vehicle_j].size(); ++rj_idx) {
                     const auto& route_j = orig_rj[vehicle_j][rj_idx];
 
                     // Skip same route (compare by first interior customer)
                     if (route_i->data().customers[1] == route_j->data().customers[1]) continue;
 
-                    // Collect neighbors
-                    using Tup = std::tuple<
-                        std::optional<LocalRc<RI>>,
-                        std::optional<LocalRc<RJ>>,
-                        std::vector<size_t>>;
-                    std::vector<Tup> neighbors = route_i->template inter_route<RJ>(route_j, n);
-
-                    if (asymmetric) {
-                        // route_j.inter_route(route_i, n) -> swap (1,0) -> (0,1)
-                        auto rev = route_j->template inter_route<RI>(route_i, n);
-                        for (auto& [a, b, t] : rev) {
-                            neighbors.emplace_back(b, a, t);
-                        }
-                    }
-
-                    for (auto& [new_ri, new_rj, tabu] : neighbors) {
+                    // One neighbour: new route_i (ri: nullptr if removed) and
+                    // new route_j (rj: nullptr if removed).
+                    auto consider = [&](const RouteVals* vi, const std::vector<size_t>* ri,
+                                        const RouteVals* vj, const std::vector<size_t>* rj,
+                                        const size_t* tabu, size_t tabu_size) {
                         // single_customer constraint
-                        if (new_ri && RouteHelper<RI>::single_customer() &&
-                            (*new_ri)->data().customers.size() != 3) continue;
-                        if (new_rj && RouteHelper<RJ>::single_customer() &&
-                            (*new_rj)->data().customers.size() != 3) continue;
+                        if (ri && RouteHelper<RI>::single_customer() && ri->size() != 3) return;
+                        if (rj && RouteHelper<RJ>::single_customer() && rj->size() != 3) return;
 
-                        // Determine index correction for swap_remove
+                        // The route lists after the move, as applied below to
+                        // truck_cloned / drone_cloned (swap_remove included).
                         size_t rj_idx_adj = rj_idx;
+                        VehicleSub subs[2];
+                        size_t nsubs = 0;
+                        list_i = vals_i;
+                        if (vi) list_i[ri_idx] = *vi;
+                        else {
+                            if (same_list && rj_idx == vals_i.size() - 1) rj_idx_adj = ri_idx;
+                            swap_remove_vals(list_i, ri_idx);
+                        }
+                        std::vector<RouteVals>& lj = same_list ? list_i : list_j;
+                        if (!same_list) lj = vals_j;
+                        if (vj) lj[rj_idx_adj] = *vj;
+                        else    swap_remove_vals(lj, rj_idx_adj);
+                        subs[nsubs++] = {ri_truck, vehicle_i, sum_vehicle<RI>(list_i)};
+                        if (!same_list) subs[nsubs++] = {rj_truck, vehicle_j, sum_vehicle<RJ>(list_j)};
+                        const Totals tot = base_totals.with(subs, nsubs);
 
-                        // Apply new_ri
+                        // internal_update(), on the totals
+                        ++st.evaluations;
+                        if (st.require_feasible && !tot.feasible) return;
+                        const double cost = Solution::penalized_cost(
+                            tot.working_time, tot.energy_violation, tot.capacity_violation,
+                            tot.waiting_time_violation, tot.fixed_time_violation);
+                        const bool new_global = cost < st.aspiration_cost && tot.feasible;
+                        // Unsorted key: see the tabu note at the top of this file.
+                        tabu_buf.assign(tabu, tabu + tabu_size);
+                        const bool in_tabu = !new_global && st.tabu_list.contains(tabu_buf);
+                        if (!(new_global || (!in_tabu && cost < st.min_cost))) return;
+
+                        // New best neighbour: build it as before.
                         {
                             auto& cr = RouteHelper<RI>::get_routes_mut(truck_cloned, drone_cloned);
-                            if (new_ri) {
-                                cr[vehicle_i][ri_idx] = *new_ri;
-                            } else {
-                                // Check if RI == RJ and same vehicle: swap_remove
-                                // from route_i's vector may affect route_j's index
-                                if constexpr (std::is_same_v<RI, RJ>) {
-                                    if (vehicle_i == vehicle_j &&
-                                        rj_idx == orig_rj[vehicle_j].size() - 1) {
-                                        rj_idx_adj = ri_idx;
-                                    }
-                                }
-                                swap_remove_elem(cr[vehicle_i], ri_idx);
-                            }
+                            if (ri) cr[vehicle_i][ri_idx] = RouteHelper<RI>::make(*ri);
+                            else    swap_remove_elem(cr[vehicle_i], ri_idx);
                         }
-
-                        // Apply new_rj
                         {
                             auto& cr = RouteHelper<RJ>::get_routes_mut(truck_cloned, drone_cloned);
-                            if (new_rj) {
-                                cr[vehicle_j][rj_idx_adj] = *new_rj;
-                            } else {
-                                swap_remove_elem(cr[vehicle_j], rj_idx_adj);
-                            }
+                            if (rj) cr[vehicle_j][rj_idx_adj] = RouteHelper<RJ>::make(*rj);
+                            else    swap_remove_elem(cr[vehicle_j], rj_idx_adj);
                         }
-
+                        size_t changed_truck[2] = {Solution::NO_VEHICLE, Solution::NO_VEHICLE};
+                        size_t changed_drone[2] = {Solution::NO_VEHICLE, Solution::NO_VEHICLE};
+                        (ri_truck ? changed_truck : changed_drone)[0] = vehicle_i;
+                        (rj_truck ? changed_truck : changed_drone)[1] = vehicle_j;
                         Solution::update_delta_inplace(st.scratch, st.original,
-                            std::move(truck_cloned), std::move(drone_cloned));
-                        internal_update(st, st.scratch, std::move(tabu));
+                            std::move(truck_cloned), std::move(drone_cloned),
+                            changed_truck, changed_drone);
+                        st.min_cost    = cost;
+                        st.best_result = st.scratch;
+                        st.best_tabu   = tabu_buf;
+                        if (new_global) {
+                            st.aspiration_cost  = cost;
+                            st.require_feasible = true;
+                        }
 
                         // Restore
                         truck_cloned = std::move(st.scratch.truck_routes);
                         drone_cloned = std::move(st.scratch.drone_routes);
-
                         {
                             auto& cr = RouteHelper<RJ>::get_routes_mut(truck_cloned, drone_cloned);
-                            if (new_rj) {
-                                cr[vehicle_j][rj_idx_adj] = route_j;
-                            } else {
-                                swap_push(cr[vehicle_j], rj_idx_adj, route_j);
-                            }
+                            if (rj) cr[vehicle_j][rj_idx_adj] = route_j;
+                            else    swap_push(cr[vehicle_j], rj_idx_adj, route_j);
                         }
                         {
                             auto& cr = RouteHelper<RI>::get_routes_mut(truck_cloned, drone_cloned);
-                            if (new_ri) {
-                                cr[vehicle_i][ri_idx] = route_i;
-                            } else {
-                                swap_push(cr[vehicle_i], ri_idx, route_i);
-                            }
+                            if (ri) cr[vehicle_i][ri_idx] = route_i;
+                            else    swap_push(cr[vehicle_i], ri_idx, route_i);
                         }
+                    };
+
+                    route_i->template inter_route_visit<RJ>(route_j, n, bi, bj,
+                        [&](const RouteVals* vd, const std::vector<size_t>* rd,
+                            const RouteVals* vt, const std::vector<size_t>* rt,
+                            const size_t* tabu, size_t tabu_size) {
+                            consider(vd, rd, vt, rt, tabu, tabu_size);
+                        });
+                    if (asymmetric) {
+                        // route_j.inter_route(route_i, n) -> swap (1,0) -> (0,1)
+                        route_j->template inter_route_visit<RI>(route_i, n, bi, bj,
+                            [&](const RouteVals* vd, const std::vector<size_t>* rd,
+                                const RouteVals* vt, const std::vector<size_t>* rt,
+                                const size_t* tabu, size_t tabu_size) {
+                                consider(vt, rt, vd, rd, tabu, tabu_size);
+                            });
                     }
                 }
             }
         }
     };
 
-    struct TruckTag { using type = TruckRoute; };
-    struct DroneTag { using type = DroneRoute; };
-    iterate_j(TruckTag{});
-    iterate_j(DroneTag{});
+    iterate_j(Tag<TruckRoute>{});
+    iterate_j(Tag<DroneRoute>{});
 }
 
 // -----------------------------------------------------------------------
@@ -237,7 +440,7 @@ static void inter_route_extract_internal(
                     }
 
                     Solution s = Solution::make(std::move(truck_cloned), std::move(drone_cloned));
-                    internal_update(st, s, tabu);
+                    internal_update(st, s, tabu);   // NOTE: tabu NOT moved here — it's reused in inner loop over vehicle_j
 
                     truck_cloned = std::move(s.truck_routes);
                     drone_cloned = std::move(s.drone_routes);
@@ -256,10 +459,8 @@ static void inter_route_extract_internal(
         }
     };
 
-    struct TruckTag { using type = TruckRoute; };
-    struct DroneTag { using type = DroneRoute; };
-    iterate_j(TruckTag{});
-    iterate_j(DroneTag{});
+    iterate_j(Tag<TruckRoute>{});
+    iterate_j(Tag<DroneRoute>{});
 }
 
 // -----------------------------------------------------------------------
@@ -412,6 +613,10 @@ std::pair<Solution, std::vector<size_t>> intra_route(
     IterState st{solution, tabu_list, aspiration_cost,
                  min_cost, require_feasible, best, best_tabu, evaluations, scratch};
 
+    // Only this vehicle's route list changes.
+    const size_t changed_truck[2] = {is_truck ? vehicle : Solution::NO_VEHICLE, Solution::NO_VEHICLE};
+    const size_t changed_drone[2] = {is_truck ? Solution::NO_VEHICLE : vehicle, Solution::NO_VEHICLE};
+
     auto do_search = [&](auto& routes, auto& cloned) {
         if (vehicle >= routes.size()) return;
         for (size_t i = 0; i < routes[vehicle].size(); ++i) {
@@ -420,7 +625,8 @@ std::pair<Solution, std::vector<size_t>> intra_route(
             for (auto& [new_route, tabu] : neighbors) {
                 cloned[vehicle][i] = new_route;
                 Solution::update_delta_inplace(st.scratch, st.original,
-                    std::move(truck_cloned), std::move(drone_cloned));
+                    std::move(truck_cloned), std::move(drone_cloned),
+                    changed_truck, changed_drone);
                 internal_update(st, st.scratch, std::move(tabu));
                 truck_cloned = std::move(st.scratch.truck_routes);
                 drone_cloned = std::move(st.scratch.drone_routes);

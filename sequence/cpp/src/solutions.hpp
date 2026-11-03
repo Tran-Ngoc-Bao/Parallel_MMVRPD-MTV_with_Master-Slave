@@ -72,7 +72,23 @@ struct Solution {
         std::vector<std::vector<LocalRc<TruckRoute>>> new_truck_routes,
         std::vector<std::vector<LocalRc<DroneRoute>>> new_drone_routes);
 
+    // Same as above when only the listed vehicles changed (up to two per type,
+    // NO_VEHICLE when unused); the others reuse base's values without comparing routes.
+    static constexpr size_t NO_VEHICLE = static_cast<size_t>(-1);
+    static void update_delta_inplace(
+        Solution& scratch,
+        const Solution& base,
+        std::vector<std::vector<LocalRc<TruckRoute>>> new_truck_routes,
+        std::vector<std::vector<LocalRc<DroneRoute>>> new_drone_routes,
+        const size_t (&changed_truck)[2],
+        const size_t (&changed_drone)[2]);
+
     double cost() const;
+
+    // cost() of a solution with these totals (cost() itself uses it).
+    static double penalized_cost(double working_time, double energy_violation,
+                                 double capacity_violation, double waiting_time_violation,
+                                 double fixed_time_violation);
 
     size_t hamming_distance(const Solution& other) const;
 
