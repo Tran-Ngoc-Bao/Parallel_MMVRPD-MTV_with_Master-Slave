@@ -1,15 +1,16 @@
 #include "parallel.hpp"
 
-#include <mpi.h>
-
 #include <algorithm>
 #include <numeric>
 #include <cmath>
 #include <chrono>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <exception>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
-#include <list>
 #include <string>
 #include <thread>
 #include <random>
@@ -21,8 +22,14 @@
 #include <cstdint>
 #include <optional>
 
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#endif
+
 #include <nlohmann/json.hpp>
 
+#include "comm.hpp"
 #include "config.hpp"
 #include "logger.hpp"
 #include "solutions.hpp"
@@ -38,40 +45,36 @@ constexpr int TAG_ELITE_REPLY = 106; // master -> worker: reply to pull request
 constexpr int TAG_STATS = 107;       // worker -> master: total evaluations and elite-push counts
 constexpr int TAG_EVAL_PROGRESS = 108; // worker -> master: running evaluations count, sent every 1/128 of its budget
 
-void send_string_impl(int dest, int tag, const std::string& payload)
+constexpr int MASTER = 0;
+
+// One thread's end of the Comm: its rank plus the shared mailboxes.
+struct Endpoint {
+    Comm& comm;
+    int   rank;
+};
+
+void send_string_impl(Endpoint& ep, int dest, int tag, std::string payload)
 {
-    int size = static_cast<int>(payload.size());
-    MPI_Send(&size, 1, MPI_INT, dest, tag, MPI_COMM_WORLD);
-    if (size > 0) {
-        MPI_Send(payload.data(), size, MPI_CHAR, dest, tag, MPI_COMM_WORLD);
-    }
+    ep.comm.send(ep.rank, dest, tag, std::move(payload));
 }
 
-std::string recv_string_impl(int source, int tag)
+std::string recv_string_impl(Endpoint& ep, int source, int tag)
 {
-    MPI_Status status{};
-    int size = 0;
-    MPI_Recv(&size, 1, MPI_INT, source, tag, MPI_COMM_WORLD, &status);
-    std::string payload(static_cast<std::size_t>(size), '\0');
-    if (size > 0) {
-        MPI_Recv(payload.data(), size, MPI_CHAR, source, tag, MPI_COMM_WORLD, &status);
-    }
-    return payload;
+    return ep.comm.recv(ep.rank, source, tag).payload;
 }
 
-void send_job_start(int dest, std::size_t seed, std::size_t coop_seed)
+void send_job_start(Endpoint& ep, int dest, std::size_t seed, std::size_t coop_seed)
 {
     nlohmann::json j;
     j["seed"]         = seed;
     j["coop_seed"]    = coop_seed;
-    send_string_impl(dest, TAG_JOB, j.dump());
+    send_string_impl(ep, dest, TAG_JOB, j.dump());
 }
 
 // No elite available to send, but the worker should keep running.
-void send_empty_signal(int dest, int tag)
+void send_empty_signal(Endpoint& ep, int dest, int tag)
 {
-    int size = -2;
-    MPI_Send(&size, 1, MPI_INT, dest, tag, MPI_COMM_WORLD);
+    ep.comm.send(ep.rank, dest, tag, std::string{}, /*empty=*/true);
 }
 
 static void randomize_worker_adaptive_hyperparams(Config& cfg)
@@ -100,82 +103,27 @@ static void randomize_worker_adaptive_hyperparams(Config& cfg)
 
 enum class PullReply { Solution, Empty };
 
-// Sentinel: size == -2 means Empty (see send_empty_signal).
-static PullReply recv_pull_reply(int source, int tag, Solution& solution)
+static PullReply recv_pull_reply(Endpoint& ep, int source, int tag, Solution& solution)
 {
-    MPI_Status status{};
-    int size = 0;
-    MPI_Recv(&size, 1, MPI_INT, source, tag, MPI_COMM_WORLD, &status);
-    if (size == -2) return PullReply::Empty;
-
-    std::string payload(static_cast<std::size_t>(size), '\0');
-    if (size > 0) {
-        MPI_Recv(payload.data(), size, MPI_CHAR, source, tag, MPI_COMM_WORLD, &status);
-    }
-    solution = Solution::from_json(nlohmann::json::parse(payload));
+    Comm::Message m = ep.comm.recv(ep.rank, source, tag);
+    if (m.empty) return PullReply::Empty;
+    solution = Solution::from_json(nlohmann::json::parse(m.payload));
     return PullReply::Solution;
 }
 
 struct JobStart { std::size_t seed; std::size_t coop_seed; };
-JobStart recv_job_start(int source)
+JobStart recv_job_start(Endpoint& ep, int source)
 {
-    nlohmann::json j = nlohmann::json::parse(recv_string_impl(source, TAG_JOB));
+    nlohmann::json j = nlohmann::json::parse(recv_string_impl(ep, source, TAG_JOB));
     return {j.value("seed", std::size_t{0}), j.value("coop_seed", std::size_t{0})};
 }
 
-void send_solution(int dest, int tag, const Solution& solution)
+void send_solution(Endpoint& ep, int dest, int tag, const Solution& solution)
 {
-    send_string_impl(dest, tag, solution.to_json().dump());
+    send_string_impl(ep, dest, tag, solution.to_json().dump());
 }
 
-Solution recv_solution(int source, int tag)
-{
-    return Solution::from_json(nlohmann::json::parse(recv_string_impl(source, tag)));
-}
-
-struct PendingSend {
-    int size = 0;
-    std::string payload;
-    MPI_Request req_size    = MPI_REQUEST_NULL;
-    MPI_Request req_payload = MPI_REQUEST_NULL;
-};
-
-void reap_completed_sends(std::list<PendingSend>& pending)
-{
-    for (auto it = pending.begin(); it != pending.end(); ) {
-        int done_size = 0, done_payload = 0;
-        MPI_Test(&it->req_size, &done_size, MPI_STATUS_IGNORE);
-        MPI_Test(&it->req_payload, &done_payload, MPI_STATUS_IGNORE);
-        if (done_size && done_payload) it = pending.erase(it);
-        else ++it;
-    }
-}
-
-void send_solution_async(int dest, int tag, const Solution& solution,
-                          std::list<PendingSend>& pending)
-{
-    reap_completed_sends(pending);
-
-    pending.emplace_back();
-    PendingSend& p = pending.back();
-    p.payload = solution.to_json().dump();
-    p.size    = static_cast<int>(p.payload.size());
-    MPI_Isend(&p.size, 1, MPI_INT, dest, tag, MPI_COMM_WORLD, &p.req_size);
-    if (p.size > 0) {
-        MPI_Isend(p.payload.data(), p.size, MPI_CHAR, dest, tag, MPI_COMM_WORLD, &p.req_payload);
-    }
-}
-
-void wait_all_pending_sends(std::list<PendingSend>& pending)
-{
-    for (auto& p : pending) {
-        MPI_Wait(&p.req_size, MPI_STATUS_IGNORE);
-        MPI_Wait(&p.req_payload, MPI_STATUS_IGNORE);
-    }
-    pending.clear();
-}
-
-void send_stats(int dest, std::size_t total_evaluations, std::size_t push_count,
+void send_stats(Endpoint& ep, int dest, std::size_t total_evaluations, std::size_t push_count,
                  std::size_t pull_round_improved_count, std::size_t iterations)
 {
     nlohmann::json j;
@@ -183,13 +131,13 @@ void send_stats(int dest, std::size_t total_evaluations, std::size_t push_count,
     j["push_count"]               = push_count;
     j["pull_round_improved_count"] = pull_round_improved_count;
     j["iterations"]              = iterations;
-    send_string_impl(dest, TAG_STATS, j.dump());
+    send_string_impl(ep, dest, TAG_STATS, j.dump());
 }
 
-void recv_stats(int source, std::size_t& total_evaluations, std::size_t& push_count,
+void recv_stats(Endpoint& ep, int source, std::size_t& total_evaluations, std::size_t& push_count,
                  std::size_t& pull_round_improved_count, std::size_t& iterations)
 {
-    nlohmann::json j = nlohmann::json::parse(recv_string_impl(source, TAG_STATS));
+    nlohmann::json j = nlohmann::json::parse(recv_string_impl(ep, source, TAG_STATS));
     pull_round_improved_count = j.at("pull_round_improved_count").get<std::size_t>();
     total_evaluations = j.at("total_evaluations").get<std::size_t>();
     push_count        = j.at("push_count").get<std::size_t>();
@@ -480,10 +428,11 @@ std::size_t compute_elite_pool_size(const Config& cfg, int world_size)
     return std::clamp(derived, kMinClamp, kMaxClamp);
 }
 
-} // namespace
-
-Solution run_master(int world_size)
+// Master (rank 0, the calling thread): hands out the jobs, keeps the elite
+// pool, answers pull requests and collects results and statistics.
+static Solution run_master(Endpoint& ep)
 {
+    const int world_size = ep.comm.size();
     const auto t0 = std::chrono::steady_clock::now();
     const Config base_cfg = global_config();
     const cli::EliteReplaceStrategy elite_replace_strategy = base_cfg.elite_replace_strategy;
@@ -525,7 +474,7 @@ Solution run_master(int world_size)
 
     // Time-based analog of the checkpoints above: an 8-way split of time_limit,
     // clocked from the last worker's first elite push (its constructed root)
-    // rather than t1, so MPI dispatch/construction time isn't counted.
+    // rather than t1, so worker start-up/construction time isn't counted.
     const double time_checkpoint_limit = base_cfg.time_limit;
     std::size_t next_time_checkpoint = 0;
     std::vector<double> best_solution_cost_by_time_checkpoint(9, 0.0);
@@ -606,7 +555,7 @@ Solution run_master(int world_size)
         const std::size_t coop_seed   = 10000 + base_seed + static_cast<std::size_t>(worker_rank);
         worker_search_seeds[static_cast<std::size_t>(worker_rank - 1)] = search_seed;
         worker_coop_seeds[static_cast<std::size_t>(worker_rank - 1)]   = coop_seed;
-        send_job_start(worker_rank, search_seed, coop_seed);
+        send_job_start(ep, worker_rank, search_seed, coop_seed);
         worker_running[static_cast<std::size_t>(worker_rank)] = true;
         ++active_workers;
     };
@@ -621,13 +570,11 @@ Solution run_master(int world_size)
 
         // Handle elite pushes from workers
         for (;;) {
-            MPI_Status status{};
-            int ready = 0;
-            MPI_Iprobe(MPI_ANY_SOURCE, TAG_ELITE_PUSH, MPI_COMM_WORLD, &ready, &status);
-            if (!ready) break;
+            std::optional<Comm::Message> msg = ep.comm.try_recv_any(ep.rank, TAG_ELITE_PUSH);
+            if (!msg) break;
             processed = true;
-            const int worker_rank = status.MPI_SOURCE;
-            Solution elite = recv_solution(worker_rank, TAG_ELITE_PUSH);
+            const int worker_rank = msg->source;
+            Solution elite = Solution::from_json(nlohmann::json::parse(msg->payload));
             // Time-limit runs only: a worker's first push is its constructed
             // root -> feeds cp0, and the last one to arrive starts the
             // time-checkpoint clock. (Eval-limit runs checkpoint differently.)
@@ -651,13 +598,11 @@ Solution run_master(int world_size)
 
         // Handle evaluation-progress reports from workers
         for (;;) {
-            MPI_Status status{};
-            int ready = 0;
-            MPI_Iprobe(MPI_ANY_SOURCE, TAG_EVAL_PROGRESS, MPI_COMM_WORLD, &ready, &status);
-            if (!ready) break;
+            std::optional<Comm::Message> msg = ep.comm.try_recv_any(ep.rank, TAG_EVAL_PROGRESS);
+            if (!msg) break;
             processed = true;
-            const int worker_rank = status.MPI_SOURCE;
-            nlohmann::json j = nlohmann::json::parse(recv_string_impl(worker_rank, TAG_EVAL_PROGRESS));
+            const int worker_rank = msg->source;
+            nlohmann::json j = nlohmann::json::parse(msg->payload);
             latest_worker_evals[static_cast<std::size_t>(worker_rank)] =
                 j.at("evaluations").get<std::size_t>();
             capture_due_checkpoints();
@@ -665,13 +610,11 @@ Solution run_master(int world_size)
 
         // Handle elite pull from workers
         for (;;) {
-            MPI_Status status{};
-            int ready = 0;
-            MPI_Iprobe(MPI_ANY_SOURCE, TAG_ELITE_PULL, MPI_COMM_WORLD, &ready, &status);
-            if (!ready) break;
+            std::optional<Comm::Message> msg = ep.comm.try_recv_any(ep.rank, TAG_ELITE_PULL);
+            if (!msg) break;
             processed = true;
-            const int worker_rank = status.MPI_SOURCE;
-            nlohmann::json pull_req = nlohmann::json::parse(recv_string_impl(worker_rank, TAG_ELITE_PULL));
+            const int worker_rank = msg->source;
+            nlohmann::json pull_req = nlohmann::json::parse(msg->payload);
             const std::size_t worker_coop_seed = pull_req.value("seed", std::size_t{0});
             std::optional<Solution> requester_personal_best;
             if (pull_req.contains("personal_best")) {
@@ -700,21 +643,19 @@ Solution run_master(int world_size)
             }
 
             if (elite_to_send) {
-                send_solution(worker_rank, TAG_ELITE_REPLY, *elite_to_send);
+                send_solution(ep, worker_rank, TAG_ELITE_REPLY, *elite_to_send);
             } else {
-                send_empty_signal(worker_rank, TAG_ELITE_REPLY);
+                send_empty_signal(ep, worker_rank, TAG_ELITE_REPLY);
             }
         }
 
         // Handle final results from workers
         for (;;) {
-            MPI_Status status{};
-            int ready = 0;
-            MPI_Iprobe(MPI_ANY_SOURCE, TAG_RESULT, MPI_COMM_WORLD, &ready, &status);
-            if (!ready) break;
+            std::optional<Comm::Message> msg = ep.comm.try_recv_any(ep.rank, TAG_RESULT);
+            if (!msg) break;
             processed = true;
-            const int worker_rank = status.MPI_SOURCE;
-            Solution result = recv_solution(worker_rank, TAG_RESULT);
+            const int worker_rank = msg->source;
+            Solution result = Solution::from_json(nlohmann::json::parse(msg->payload));
             bool result_is_new_best = !best_solution || result.cost() < best_solution->cost();
             if (result_is_new_best) {
                 best_solution = result;
@@ -725,7 +666,7 @@ Solution run_master(int world_size)
             std::size_t worker_push_count = 0;
             std::size_t worker_pull_round_improved_count = 0;
             std::size_t worker_iterations = 0;
-            recv_stats(worker_rank, worker_evaluations, worker_push_count,
+            recv_stats(ep, worker_rank, worker_evaluations, worker_push_count,
                        worker_pull_round_improved_count, worker_iterations);
             total_evaluations += worker_evaluations;
             total_push_count  += worker_push_count;
@@ -799,46 +740,48 @@ Solution run_master(int world_size)
     return *best_solution;
 }
 
-void run_worker(int /*rank*/)
+// Worker (rank >= 1, its own thread): one tabu search with its own config
+// (seed, randomized adaptive hyperparameters), talking to the master only
+// through its mailbox.
+static void run_worker(Endpoint& ep, const Config& base_cfg)
 {
-    const Config base_cfg = global_config();
-
-    auto [seed, coop_seed] = recv_job_start(0);
+    auto [seed, coop_seed] = recv_job_start(ep, MASTER);
 
     Config worker_cfg = base_cfg;
     worker_cfg.seed = seed;
     worker_cfg.disable_logging = true;
     randomize_worker_adaptive_hyperparams(worker_cfg);
-    set_global_config(worker_cfg);
+    // The global config is per thread: this worker's own copy from now on.
+    set_global_config(std::move(worker_cfg));
+    const Config& cfg = global_config();
     Solution root = Solution::initialize();
 
-    std::list<PendingSend> pending_pushes;
     std::size_t push_count = 0;
     std::size_t pull_round_improved_count = 0;
 
     Solution::EliteHooks hooks;
     hooks.push_elite = [&](const Solution& elite) {
-        send_solution_async(0, TAG_ELITE_PUSH, elite, pending_pushes);
+        send_solution(ep, MASTER, TAG_ELITE_PUSH, elite);
         ++push_count;
     };
     hooks.report_progress = [&](std::size_t total_evaluations) {
         nlohmann::json j;
         j["evaluations"] = total_evaluations;
-        send_string_impl(0, TAG_EVAL_PROGRESS, j.dump());
+        send_string_impl(ep, MASTER, TAG_EVAL_PROGRESS, j.dump());
     };
     hooks.pull_round_improved = [&]() { ++pull_round_improved_count; };
 
-    if (worker_cfg.elite_pull_strategy != cli::ElitePullStrategy::Off) {
+    if (cfg.elite_pull_strategy != cli::ElitePullStrategy::Off) {
         hooks.pull_elite = [&](std::size_t iteration, const Solution& personal_best, const Solution& current, Solution& pulled_elite) -> bool {
             nlohmann::json j;
             j["iteration"] = iteration;
             j["seed"]      = coop_seed;
-            if (worker_cfg.elite_pull_accept_strategy == cli::ElitePullAcceptStrategy::Selective) {
+            if (cfg.elite_pull_accept_strategy == cli::ElitePullAcceptStrategy::Selective) {
                 j["personal_best"] = personal_best.to_json();
                 j["current"]       = current.to_json();
             }
-            send_string_impl(0, TAG_ELITE_PULL, j.dump());
-            switch (recv_pull_reply(0, TAG_ELITE_REPLY, pulled_elite)) {
+            send_string_impl(ep, MASTER, TAG_ELITE_PULL, j.dump());
+            switch (recv_pull_reply(ep, MASTER, TAG_ELITE_REPLY, pulled_elite)) {
                 case PullReply::Solution: return true;
                 case PullReply::Empty:    return false;
             }
@@ -848,10 +791,69 @@ void run_worker(int /*rank*/)
 
     Logger logger;
     Solution result = Solution::tabu_search(root, logger, &hooks);
-    wait_all_pending_sends(pending_pushes);
-    send_solution(0, TAG_RESULT, result);
-    send_stats(0, logger.total_evaluations, push_count, pull_round_improved_count,
+    send_solution(ep, MASTER, TAG_RESULT, result);
+    send_stats(ep, MASTER, logger.total_evaluations, push_count, pull_round_improved_count,
                logger._iteration);
 }
 
-} // namespace parallel
+static void pin_current_thread(int cpu)
+{
+    bool ok = false;
+#if defined(__linux__)
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(cpu, &set);
+    ok = pthread_setaffinity_np(pthread_self(), sizeof(set), &set) == 0;
+#endif
+    if (!ok) std::cerr << "Warning: cannot pin a thread to CPU " << cpu << "\n";
+}
+
+// A failing worker cannot report to the master, which would then wait for
+// its result forever; stop the whole program instead, as an MPI rank
+// failure aborted the job.
+[[noreturn]] static void abort_run(const std::string& who, const char* what)
+{
+    std::cerr << "Error in " << who << ": " << what << "\n";
+    std::fflush(stderr);
+    std::_Exit(EXIT_FAILURE);
+}
+
+} // namespace
+
+Solution run(std::size_t workers, const std::vector<int>& cpus)
+{
+    Comm comm(static_cast<int>(workers) + 1);
+    // Copied before any thread starts: workers build their own config from it.
+    const Config base_cfg = global_config();
+
+    // Every Logger creates the outputs directory; do it once here so the
+    // workers do not race on it.
+    if (!base_cfg.outputs.empty()) std::filesystem::create_directories(base_cfg.outputs);
+
+    // Worker r (1..workers) runs on cpus[(r - 1) % size]; the master on
+    // cpus[workers] when the list has a CPU left for it, else unpinned.
+    if (cpus.size() > workers) pin_current_thread(cpus[workers]);
+
+    std::vector<std::thread> threads;
+    threads.reserve(workers);
+    for (std::size_t r = 1; r <= workers; ++r) {
+        threads.emplace_back([&, r] {
+            if (!cpus.empty()) pin_current_thread(cpus[(r - 1) % cpus.size()]);
+            Endpoint ep{comm, static_cast<int>(r)};
+            try { run_worker(ep, base_cfg); }
+            catch (const std::exception& e) { abort_run("worker " + std::to_string(r), e.what()); }
+            catch (...) { abort_run("worker " + std::to_string(r), "unknown exception"); }
+        });
+    }
+
+    Endpoint ep{comm, MASTER};
+    Solution best;
+    try { best = run_master(ep); }
+    catch (const std::exception& e) { abort_run("master", e.what()); }
+    catch (...) { abort_run("master", "unknown exception"); }
+
+    for (auto& t : threads) t.join();
+    return best;
+}
+
+} // namespace parallel

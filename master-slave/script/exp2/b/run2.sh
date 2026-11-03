@@ -97,7 +97,7 @@ PYEOF
             fi
 
             SEED=$(( x * 100 ))
-            echo "=== ${DATA_FILE_NAME} ${SET_NAME} (pool_size=${POOL_SIZE}) run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
+            echo "=== ${DATA_FILE_NAME} ${SET_NAME} (pool_size=${POOL_SIZE}) run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} threads (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
             NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
                 ELITE_PULL_STRATEGY="${ELITE_PULL_STRATEGY}" \
                 ELITE_POOL_SIZE="${POOL_SIZE}" \

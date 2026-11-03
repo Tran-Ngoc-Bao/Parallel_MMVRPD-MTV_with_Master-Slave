@@ -13,7 +13,7 @@ namespace fs = std::filesystem;
 static std::string random_id(size_t len = 8) {
     static const char chars[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    static std::mt19937 rng{std::random_device{}()};
+    thread_local std::mt19937 rng{std::random_device{}()};
     std::uniform_int_distribution<> dist(0, sizeof(chars)-2);
     std::string s;
     s.reserve(len);

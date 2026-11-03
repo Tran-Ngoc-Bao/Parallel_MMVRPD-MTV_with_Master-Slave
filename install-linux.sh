@@ -22,8 +22,6 @@ ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y \
     build-essential \
     cmake \
     git \
-    openmpi-bin \
-    libopenmpi-dev \
     curl \
     ca-certificates \
     python3 \

@@ -11,7 +11,7 @@ export LC_NUMERIC=C
 #
 # Unlike sequence/cpp's island model (N independent OS processes, best of
 # N picked afterwards), one master-slave run already IS a full cooperative
-# pool of MPI ranks (1 master + NUM_WORKERS-1 slaves) producing a single
+# pool of threads (1 master + NUM_WORKERS-1 slaves) producing a single
 # result, so there is no separate pick_best step here.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,7 +50,7 @@ for DATA_FILE in "${DATA_FILES[@]}"; do
         fi
 
         SEED=$(( x * 100 ))
-        echo "=== ${DATA_FILE_NAME} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), seed ${SEED} ==="
+        echo "=== ${DATA_FILE_NAME} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} threads (1 master + $((NUM_WORKERS - 1)) workers), seed ${SEED} ==="
         NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" TIME_LIMIT="${TIME_LIMIT}" \
             OUTPUTS_DIR="${OUTPUT_DIR}" RUN_ID="${x}" \
             bash "${RUN_SCRIPT}" "${DATA_FILE}"

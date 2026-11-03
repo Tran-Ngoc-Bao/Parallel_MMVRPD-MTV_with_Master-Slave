@@ -19,7 +19,12 @@ ELITE_PULL_QUALITY_TOLERANCE_PCT="${ELITE_PULL_QUALITY_TOLERANCE_PCT:-1.0}"
 ELITE_POOL_FACTOR="${ELITE_POOL_FACTOR:-0.036}"
 ELITE_POOL_SIZE="${ELITE_POOL_SIZE:-0}"
 ELITE_REPLACE_STRATEGY="${ELITE_REPLACE_STRATEGY:-edge-crowding}"
+# Threads of a run, master included (as the former `mpirun -np`): the
+# program gets --workers NUM_WORKERS-1. 1 runs a plain sequential search.
 NUM_WORKERS="${NUM_WORKERS:-7}"
+# CPU list for --cpus, e.g. "0,2,4,6,8,10,12": worker r on the r-th CPU,
+# the master on the next one if any. Empty: no pinning.
+CPUS="${CPUS:-}"
 OUTPUTS_DIR="${OUTPUTS_DIR:-outputs}"
 COMPACT_OUTPUT="${COMPACT_OUTPUT:-1}"
 RUN_ID="${RUN_ID:-}"
@@ -27,10 +32,15 @@ SEED="${SEED:-}"
 TIME_LIMIT="${TIME_LIMIT:-}"
 MAX_EVALUATIONS="${MAX_EVALUATIONS:-}"
 
+if [ "${NUM_WORKERS}" -lt 1 ]; then
+  echo "NUM_WORKERS must be at least 1 (master included)" >&2
+  exit 1
+fi
+
 CMD=(
-  mpirun --allow-run-as-root -np "${NUM_WORKERS}"
   "${BUILD_DIR}/master_slave" run
   "${PROBLEM_FILE}"
+  --workers "$(( NUM_WORKERS - 1 ))"
   --adaptive-iterations "${ADAPTIVE_ITERATIONS}"
   --adaptive-pull-elite-segments "${ADAPTIVE_PULL_ELITE_SEGMENTS}"
   --elite-pull-strategy "${ELITE_PULL_STRATEGY}"
@@ -61,6 +71,10 @@ fi
 
 if [ -n "${MAX_EVALUATIONS}" ]; then
   CMD+=(--max-evaluations "${MAX_EVALUATIONS}")
+fi
+
+if [ -n "${CPUS}" ]; then
+  CMD+=(--cpus "${CPUS}")
 fi
 
 "${CMD[@]}"

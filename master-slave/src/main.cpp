@@ -4,9 +4,9 @@
 #include <filesystem>
 #include <chrono>
 #include <iomanip>
+#include <sstream>
+#include <stdexcept>
 #include <nlohmann/json.hpp>
-#include <mpi.h>
-#include <sched.h>
 
 #include "cli.hpp"
 #include "config.hpp"
@@ -14,46 +14,29 @@
 #include "solutions.hpp"
 #include "logger.hpp"
 
-// i5-14400F: 6 P-cores (SMT pairs) + 4 E-cores (no SMT).
-static constexpr int P_CORE_FIRST[] = {0, 2, 4, 6, 8, 10};
-static constexpr int P_CORE_COUNT   = 6;
-static constexpr int E_CORE[]       = {12, 13, 14, 15};
-static constexpr int E_CORE_COUNT   = 4;
-
-static void pin_process(int cpu)
+// "0,2,4-7" -> {0, 2, 4, 5, 6, 7}
+static std::vector<int> parse_cpu_list(const std::string& text)
 {
-    cpu_set_t set;
-    CPU_ZERO(&set);
-    CPU_SET(cpu, &set);
-    if (sched_setaffinity(0, sizeof(set), &set) != 0) {
-        std::cerr << "Warning: failed to pin process to CPU " << cpu << "\n";
+    std::vector<int> cpus;
+    std::stringstream ss(text);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        if (item.empty()) continue;
+        const auto dash = item.find('-');
+        try {
+            int first = std::stoi(item.substr(0, dash));
+            int last  = dash == std::string::npos ? first : std::stoi(item.substr(dash + 1));
+            if (first < 0 || last < first) throw std::invalid_argument(item);
+            for (int c = first; c <= last; ++c) cpus.push_back(c);
+        } catch (const std::exception&) {
+            throw std::runtime_error("Invalid --cpus item: " + item);
+        }
     }
-}
-
-// Workers get a dedicated non-SMT P-core each; master takes a leftover
-// P-core, or an E-core once workers have claimed all of them.
-static void pin_to_cores(int rank, int world_size)
-{
-    int num_workers = world_size - 1;
-    if (rank == 0) {
-        if (num_workers < P_CORE_COUNT) pin_process(P_CORE_FIRST[num_workers]);
-        else                            pin_process(E_CORE[0]);
-        return;
-    }
-    int worker_idx = rank - 1;
-    if (worker_idx < P_CORE_COUNT) {
-        pin_process(P_CORE_FIRST[worker_idx]);
-    } else if (worker_idx < P_CORE_COUNT * 2) {
-        pin_process(P_CORE_FIRST[worker_idx - P_CORE_COUNT] + 1);
-    } else {
-        pin_process(E_CORE[(worker_idx - P_CORE_COUNT * 2) % E_CORE_COUNT]);
-    }
+    return cpus;
 }
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
-
     CLI::App app{"Tabu Search for VRP with Drones"};
     app.require_subcommand(1);
 
@@ -188,6 +171,15 @@ int main(int argc, char** argv)
     run_cmd->add_option("--extra",                 args.run.extra);
     std::optional<uint64_t> seed_cli;
     run_cmd->add_option("--seed", seed_cli);
+    std::size_t workers = 0;
+    run_cmd->add_option("--workers", workers,
+        "Worker threads, each running its own tabu search, besides the master "
+        "thread (the former MPI ranks 1..N). 0 runs a single sequential tabu search");
+    std::string cpus_text;
+    run_cmd->add_option("--cpus", cpus_text,
+        "CPU list such as 0,2,4-7 to pin the threads to: worker r (1..N) on the "
+        "((r-1) mod size)-th CPU, the master on the (N+1)-th CPU if the list has "
+        "one left. Empty (default): no pinning. Used with --workers > 0 only");
 
     // ---- evaluate subcommand ----
     auto* eval_cmd = app.add_subcommand("evaluate", "Evaluate a solution");
@@ -195,12 +187,6 @@ int main(int argc, char** argv)
     eval_cmd->add_option("config",   args.evaluate.config,   "Config JSON")  ->required();
 
     CLI11_PARSE(app, argc, argv);
-
-    int rank = 0;
-    int world_size = 1;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    pin_to_cores(rank, world_size);
 
     if (run_cmd->parsed()) {
         args.cmd = cli::CommandType::Run;
@@ -212,23 +198,19 @@ int main(int argc, char** argv)
         args.cmd = cli::CommandType::Evaluate;
     }
 
-    if (args.cmd == cli::CommandType::Evaluate && rank != 0) {
-        MPI_Finalize();
-        return 0;
-    }
-
     Solution solution;
 
     if (args.cmd == cli::CommandType::Run) {
         set_global_config(build_config(args.run));
-        if (world_size > 1) {
-            if (rank == 0) {
-                solution = parallel::run_master(world_size);
-            } else {
-                parallel::run_worker(rank);
-                MPI_Finalize();
-                return 0;
+        if (workers > 0) {
+            std::vector<int> cpus;
+            try {
+                cpus = parse_cpu_list(cpus_text);
+            } catch (const std::exception& e) {
+                std::cerr << e.what() << "\n";
+                return 1;
             }
+            solution = parallel::run(workers, cpus);
         } else {
             Logger logger;
             auto t0 = std::chrono::steady_clock::now();
@@ -257,6 +239,5 @@ int main(int argc, char** argv)
 
     std::cerr << "Result = " << solution.working_time << "\n";
     solution.verify();
-    MPI_Finalize();
     return 0;
 }

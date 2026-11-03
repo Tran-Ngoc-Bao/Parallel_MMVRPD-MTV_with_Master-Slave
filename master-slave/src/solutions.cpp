@@ -21,13 +21,11 @@
 // Penalty coefficients
 // -----------------------------------------------------------------------
 namespace penalty {
-    std::atomic<double> coeff[4] = {
-        {1.0}, {1.0}, {1.0}, {1.0}
-    };
+    thread_local double coeff[4] = {1.0, 1.0, 1.0, 1.0};
     void update(int i, double violation) {
-        double v = coeff[i].load(std::memory_order_relaxed);
+        double v = coeff[i];
         v = (violation > 0.0) ? v * 1.5 : v / 1.5;
-        coeff[i].store(std::clamp(v, 1.0, 1e3), std::memory_order_relaxed);
+        coeff[i] = std::clamp(v, 1.0, 1e3);
     }
 }
 

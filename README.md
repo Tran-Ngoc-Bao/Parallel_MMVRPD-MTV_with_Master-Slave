@@ -6,7 +6,7 @@ The repository has two solvers:
 
 | Solver | Path | Description |
 |---|---|---|
-| **master-slave** | `master-slave/` | C++17 + MPI. One master process keeps a shared **elite pool**. Worker processes run tabu search and push/pull elite solutions through the master. |
+| **master-slave** | `master-slave/` | C++17 + `std::thread`. One master thread keeps a shared **elite pool**. Worker threads run tabu search and push/pull elite solutions through the master. |
 | **sequence** | `sequence/cpp/`, `sequence/rust/` | Sequential baseline (one tabu search per process), in C++ and Rust. Used for the `sats` (single run) and `ims` (island model: independent runs, best picked afterwards) baselines. |
 
 ## Repository layout
@@ -17,7 +17,7 @@ The repository has two solvers:
 ├── bks/                  # Best-known solutions per instance (<n>/<instance>-bks.json)
 │   └── capacity-1400_baseline.xlsx   # Source baseline used to generate the BKS files
 ├── master-slave/
-│   ├── src/              # Solver sources (parallel.cpp = MPI master/worker logic)
+│   ├── src/              # Solver sources (parallel.cpp = master/worker logic, comm.hpp = thread mailboxes)
 │   ├── problems/config_parameter/    # Truck & drone parameter files (JSON)
 │   ├── script/           # build.sh, script.sh, experiment scripts (exp1-full, exp2/*)
 │   └── outputs/          # Experiment results (JSON)
@@ -33,21 +33,20 @@ Every search process runs an **adaptive tabu search** over these neighborhoods: 
 
 In the **master-slave** version (`master-slave/src/parallel.cpp`):
 
-- **Rank 0 (master)** keeps an elite pool of solutions. It does not run a search itself.
-- **Ranks 1..N-1 (workers)** each build an initial solution and run tabu search with their own seed. They:
+- **Rank 0 (master, the main thread)** keeps an elite pool of solutions. It does not run a search itself.
+- **Ranks 1..N (workers, one thread each, `--workers N`)** each build an initial solution and run tabu search with their own seed, config and penalty coefficients. They:
   - **push** good solutions to the master (`--elite-push-strategy`: `new-best`, `segment-best`, `significant-best`);
   - **pull** an elite solution from the master every few non-improving segments (`--adaptive-pull-elite-segments`, `--elite-pull-strategy`: `random`, `topk`, `rank`, `pullcount`, `off`);
   - accept a pulled solution either always or only when it is good and diverse enough (`--elite-pull-accept-strategy`, `--elite-pull-quality-tolerance-pct`).
 - When the pool is full, the master picks which solution to replace with `--elite-replace-strategy` (`td-crowding`, `edge-crowding`, `quality-only`, `random-target`).
 - At the end, the master collects every worker's result and returns the best solution.
 
-With only one MPI process, the binary runs a plain sequential tabu search.
+The threads only exchange serialized messages through per-thread mailboxes (`src/comm.hpp`), as the former MPI ranks did. With `--workers 0` (the default), the binary runs a plain sequential tabu search.
 
 ## Requirements
 
 - Linux (Debian/Ubuntu recommended)
 - CMake ≥ 3.16 and a C++17 compiler (GCC)
-- OpenMPI (`openmpi-bin`, `libopenmpi-dev`)
 - Python 3 + `matplotlib` (for the statistics and plotting scripts)
 - Rust / Cargo (only for `sequence/rust`)
 
@@ -62,7 +61,7 @@ CLI11, nlohmann/json and mimalloc are downloaded automatically by CMake (`FetchC
 ## Build
 
 ```bash
-# Master-slave (MPI)
+# Master-slave
 bash master-slave/script/build.sh          # release build  -> master-slave/build/master_slave
 bash master-slave/script/build.sh pgo      # optional two-pass profile-guided build
 
@@ -87,7 +86,7 @@ NUM_WORKERS=7 bash master-slave/script/script.sh data/200.10.2.txt
 bash sequence/cpp/script/script.sh data/200.10.2.txt
 ```
 
-`master-slave/script/script.sh` reads these environment variables: `NUM_WORKERS` (total MPI processes, master included), `SEED`, `TIME_LIMIT`, `MAX_EVALUATIONS`, `OUTPUTS_DIR`, `RUN_ID`, `COMPACT_OUTPUT`, and the `ELITE_*` / `ADAPTIVE_*` parameters.
+`master-slave/script/script.sh` reads these environment variables: `NUM_WORKERS` (total threads, master included; the program gets `--workers NUM_WORKERS-1`), `CPUS` (CPU list for `--cpus`, empty = no pinning), `SEED`, `TIME_LIMIT`, `MAX_EVALUATIONS`, `OUTPUTS_DIR`, `RUN_ID`, `COMPACT_OUTPUT`, and the `ELITE_*` / `ADAPTIVE_*` parameters.
 
 ### Calling the binary directly
 
@@ -95,7 +94,8 @@ Run from inside `master-slave/`, because the default truck/drone config paths ar
 
 ```bash
 cd master-slave
-mpirun -np 7 ./build/master_slave run ../data/200.10.2.txt \
+./build/master_slave run ../data/200.10.2.txt \
+    --workers 6 --cpus 0,2,4,6,8,10,12 \
     --seed 1 --time-limit 35 \
     --elite-pool-size 4 \
     --elite-pull-strategy rank \
@@ -112,6 +112,8 @@ Useful options (see `src/main.cpp` and `src/cli.hpp` for the full list):
 | `-c, --config` | Drone energy model: `linear`, `non-linear`, `endurance` (default), `unlimited` |
 | `--truck-cfg`, `--drone-cfg` | Truck/drone parameter JSON files |
 | `--trucks-count`, `--drones-count` | Override the fleet size given in the instance |
+| `--workers` | Worker threads besides the master (0 = sequential tabu search) |
+| `--cpus` | CPU list (`0,2,4-7`) to pin to: worker r on the r-th CPU, the master on the next one if the list has one left |
 | `--strategy` | Neighborhood selection: `random`, `cyclic`, `vns`, `adaptive` (default) |
 | `--time-limit` | Stop after N seconds per worker |
 | `--max-evaluations` | Stop after N neighborhood evaluations per worker (takes priority over `--time-limit`) |
@@ -167,5 +169,5 @@ The run scripts skip result files that already exist, so an interrupted experime
 
 ## Notes
 
-- **CPU pinning:** `master-slave/src/main.cpp` pins each MPI rank to a core using a layout written for an **Intel i5-14400F** (6 P-cores + 4 E-cores). The sequence scripts use the same core IDs by default (`CPU_CORES=0,2,4,6,8,10`). Change these values on other hardware.
-- `script.sh` calls `mpirun --allow-run-as-root`. Remove this flag if you do not run as root.
+- **CPU pinning:** threads are pinned only with `--cpus` (`CPUS` in `script.sh`). The former MPI build pinned each rank with a layout written for an **Intel i5-14400F**: workers on `0,2,4,6,8,10`, then `1,3,…`, then the E-cores `12-15`, and the master on a leftover P-core or `12`; `CPUS=0,2,4,6,8,10,12` gives the same layout for 6 workers. The sequence scripts use `CPU_CORES=0,2,4,6,8,10` by default. Check the core IDs of other hardware with `lscpu -e`.
+- Results in `master-slave/outputs/` up to exp2 were produced by the former MPI build. The algorithm is unchanged, but message timing differs, so compare new runs with them statistically, not run by run.

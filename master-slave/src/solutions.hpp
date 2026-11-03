@@ -8,12 +8,13 @@
 #include "routes.hpp"
 
 // -----------------------------------------------------------------------
-// Penalty coefficients – global atomics
+// Penalty coefficients – one set per thread: each master-slave worker
+// adapts its own, as each MPI rank did in its own process.
 // -----------------------------------------------------------------------
 namespace penalty {
-    extern std::atomic<double> coeff[4];
-    inline double get(int i) { return coeff[i].load(std::memory_order_relaxed); }
-    inline void   set(int i, double v) { coeff[i].store(v, std::memory_order_relaxed); }
+    extern thread_local double coeff[4];
+    inline double get(int i) { return coeff[i]; }
+    inline void   set(int i, double v) { coeff[i] = v; }
     void update(int i, double violation);
 }
 

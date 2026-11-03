@@ -194,7 +194,10 @@ Config build_config_from_json(const std::string& json_path);
 // Serialize to JSON (for writing -config.json output)
 nlohmann::json config_to_json(const Config& cfg);
 
-// Global singleton – initialized once from CLI args
-extern Config* g_config_ptr;
+// Global singleton – initialized once from CLI args. One per thread: the
+// master-slave workers are threads, each with its own config (seed,
+// randomized adaptive hyperparameters); a new thread has none until it
+// calls set_global_config.
+extern thread_local Config* g_config_ptr;
 inline Config& global_config() noexcept { return *g_config_ptr; }
 void    set_global_config(Config cfg);

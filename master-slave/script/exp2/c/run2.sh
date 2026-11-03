@@ -61,7 +61,7 @@ for DATA_FILE in "${DATA_FILES[@]}"; do
                     continue
                 fi
                 SEED=$(( x * 100 ))
-                echo "=== ${DATA_FILE_NAME} pull=${PULL_STRATEGY} accept=${ACCEPT_STRATEGY} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} MPI ranks (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
+                echo "=== ${DATA_FILE_NAME} pull=${PULL_STRATEGY} accept=${ACCEPT_STRATEGY} run ${x}/${RUNS}: master-slave, ${NUM_WORKERS} threads (1 master + $((NUM_WORKERS - 1)) workers), base seed ${SEED} ==="
                 NUM_WORKERS="${NUM_WORKERS}" SEED="${SEED}" MAX_EVALUATIONS="${MAX_EVALUATIONS}" \
                     ADAPTIVE_PULL_ELITE_SEGMENTS="${ADAPTIVE_PULL_ELITE_SEGMENTS}" \
                     ELITE_PULL_STRATEGY="${PULL_STRATEGY}" \

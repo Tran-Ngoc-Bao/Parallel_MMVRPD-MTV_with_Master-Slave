@@ -697,10 +697,10 @@ Config build_config_from_json(const std::string& json_path)
 // -----------------------------------------------------------------------
 // Global singleton
 // -----------------------------------------------------------------------
-Config* g_config_ptr = nullptr;
+thread_local Config* g_config_ptr = nullptr;
 
 void set_global_config(Config cfg) {
-    static Config storage;
+    thread_local Config storage;
     storage      = std::move(cfg);
     g_config_ptr = &storage;
 }

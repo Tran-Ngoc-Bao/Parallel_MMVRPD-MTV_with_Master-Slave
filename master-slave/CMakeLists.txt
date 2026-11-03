@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
 
-find_package(MPI REQUIRED)
+find_package(Threads REQUIRED)
 find_package(OpenMP)
 
 FetchContent_Declare(
@@ -53,7 +53,7 @@ add_executable(master_slave
 )
 
 target_include_directories(master_slave PRIVATE src)
-target_link_libraries(master_slave PRIVATE CLI11::CLI11 nlohmann_json::nlohmann_json MPI::MPI_CXX mimalloc-static)
+target_link_libraries(master_slave PRIVATE CLI11::CLI11 nlohmann_json::nlohmann_json Threads::Threads mimalloc-static)
 
 if(OpenMP_CXX_FOUND)
     target_link_libraries(master_slave PRIVATE OpenMP::OpenMP_CXX)
