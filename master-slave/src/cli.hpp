@@ -118,7 +118,7 @@ struct RunArgs {
     double        gamma_3                    = 0.1;
     double        gamma_4                    = 0.3;
     bool          randomize_worker_adaptive_hyperparams = false;
-    EliteReplaceStrategy elite_replace_strategy = EliteReplaceStrategy::TDCrowding;
+    EliteReplaceStrategy elite_replace_strategy = EliteReplaceStrategy::EdgeCrowding;
     bool          compact_output             = false;
     std::string   run_id                     = "";
 };

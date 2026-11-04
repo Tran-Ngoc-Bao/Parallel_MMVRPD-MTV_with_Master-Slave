@@ -174,7 +174,7 @@ struct Config {
     double          gamma_3                        = 0.1;
     double          gamma_4                        = 0.3;
     bool            randomize_worker_adaptive_hyperparams = false;
-    cli::EliteReplaceStrategy elite_replace_strategy = cli::EliteReplaceStrategy::TDCrowding;
+    cli::EliteReplaceStrategy elite_replace_strategy = cli::EliteReplaceStrategy::EdgeCrowding;
     bool            compact_output                 = false;
     std::string     run_id                         = "";
 };

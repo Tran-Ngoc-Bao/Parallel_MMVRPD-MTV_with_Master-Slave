@@ -150,6 +150,15 @@ static bool is_significantly_better(double fx, double fe)
     return fx < fe - 1e-9 * std::max(1.0, fe);
 }
 
+// Structural distance of the elite pool: edge_distance under edge-crowding,
+// td_distance otherwise.
+static double structural_distance(const Solution& a, const Solution& b,
+                                  cli::EliteReplaceStrategy replace_strategy)
+{
+    return replace_strategy == cli::EliteReplaceStrategy::EdgeCrowding
+        ? static_cast<double>(a.edge_distance(b)) : a.td_distance(b);
+}
+
 // offered: true iff at least one elite from a worker other than the
 // requester exists in the pool. solution: non-null iff that elite was
 // actually sent (offered && accepted).
@@ -164,11 +173,6 @@ struct ElitePool {
 
     bool consider(Solution candidate, int source_worker, cli::EliteReplaceStrategy replace_strategy)
     {
-        // TDCrowding/EdgeCrowding only -- which structural distance the crowding target is picked by.
-        auto structural_distance = [&](const Solution& a, const Solution& b) -> double {
-            return replace_strategy == cli::EliteReplaceStrategy::EdgeCrowding
-                ? static_cast<double>(a.edge_distance(b)) : a.td_distance(b);
-        };
 
         if (solutions.size() < keep_count) {
             // Reject exact duplicates even while the pool still has room.
@@ -184,7 +188,7 @@ struct ElitePool {
             double best_diff = std::numeric_limits<double>::infinity();
 
             for (std::size_t i = 0; i < solutions.size(); ++i) {
-                double diff = structural_distance(candidate, solutions[i].sol);
+                double diff = structural_distance(candidate, solutions[i].sol, replace_strategy);
                 if (!best || diff < best_diff || (diff == best_diff && prefer(i, *best))) {
                     best_diff = diff;
                     best = i;
@@ -292,6 +296,7 @@ struct ElitePool {
     // requester's personal best, diversity vs. requester's current solution).
     PickResult pick_for_dispatch(int excluded_worker, std::mt19937& rng, cli::ElitePullStrategy strategy,
                                   cli::ElitePullAcceptStrategy accept_strategy,
+                                  cli::EliteReplaceStrategy replace_strategy,
                                   const Solution* requester_personal_best,
                                   const Solution* requester_current)
     {
@@ -387,13 +392,13 @@ struct ElitePool {
         std::vector<double> d_values;
         d_values.reserve(candidates.size());
         for (std::size_t idx : candidates) {
-            const double d = static_cast<double>(requester_current->edge_distance(solutions[idx].sol));
+            const double d = structural_distance(*requester_current, solutions[idx].sol, replace_strategy);
             if (d > 0.0) d_values.push_back(d);
         }
         if (!d_values.empty()) {
             const double mean_d = std::accumulate(d_values.begin(), d_values.end(), 0.0)
                                  / static_cast<double>(d_values.size());
-            const double d_e = static_cast<double>(requester_current->edge_distance(*picked));
+            const double d_e = structural_distance(*requester_current, *picked, replace_strategy);
             if (d_e > mean_d) {
                 return {true, picked};
             }
@@ -635,6 +640,7 @@ static Solution run_master(Endpoint& ep)
                 PickResult pick = elite_pool.pick_for_dispatch(
                     worker_rank, it->second, base_cfg.elite_pull_strategy,
                     base_cfg.elite_pull_accept_strategy,
+                    elite_replace_strategy,
                     requester_personal_best ? &*requester_personal_best : nullptr,
                     requester_current ? &*requester_current : nullptr);
                 if (pick.offered) ++pull_offer_count;
